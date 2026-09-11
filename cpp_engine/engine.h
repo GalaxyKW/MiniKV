@@ -37,7 +37,8 @@ struct EngineConfig {
     size_t wal_queue_bytes = 16 * 1024 * 1024;
     std::chrono::milliseconds wal_flush_interval{100};
     std::chrono::milliseconds snapshot_interval{20 * 60 * 1000};
-    // Tests can fail or terminate at an actual I/O boundary. Unset in the server.
+    // Tests can fail or terminate at an actual I/O boundary. Must be thread-safe:
+    // WAL and snapshot callbacks may run concurrently. Unset in the server.
     std::function<void(const std::string&)> io_hook;
     bool import_legacy = false;
 };
@@ -65,22 +66,27 @@ private:
     void load_wal();
     void import_legacy();
     void write_batch(const std::deque<PendingRecord>& records);
+    void commit_batch(const std::deque<PendingRecord>& records, size_t bytes);
     void flush_pending();
-    // Once the worker is running, these require both I/O and state locks.
+    // Requires both I/O and state locks; used only for the final shutdown flush.
     void flush_locked();
-    void snapshot_locked();
+    void install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence);
+    void compact_wal(int64_t boundary);
     void background_work();
+    void background_snapshots();
     void hook(const std::string& point);
     void fail_locked(const std::string& message);
     void release_files() noexcept;
 
     EngineConfig config_;
     std::mutex close_mutex_;
+    std::mutex snapshot_mutex_;
     // Acquire I/O before state when both are needed; never wait for I/O while
     // holding mutex_. Background WAL writes release mutex_ during file I/O.
     std::mutex io_mutex_;
     mutable std::mutex mutex_;
     std::condition_variable wake_;
+    std::condition_variable snapshot_wake_;
     std::condition_variable committed_;
     std::unordered_map<std::string, std::string> kv_;
     std::deque<PendingRecord> pending_;
@@ -93,6 +99,7 @@ private:
     bool closed_ = false;
     std::string failure_;
     std::thread worker_;
+    std::thread snapshot_worker_;
 };
 
 } // namespace minikv

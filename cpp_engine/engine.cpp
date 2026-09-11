@@ -1,6 +1,7 @@
 #include "engine.h"
 #include "codec.h"
 
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
@@ -99,7 +100,17 @@ Engine::Engine(EngineConfig config) : config_(std::move(config)) {
         if (::flock(lock_fd_, LOCK_EX | LOCK_NB) != 0) io_error("data directory is already in use");
         recover();
         worker_ = std::thread(&Engine::background_work, this);
+        if (config_.snapshot_interval.count() > 0) snapshot_worker_ = std::thread(&Engine::background_snapshots, this);
     } catch (...) {
+        // A second thread can fail to start after the WAL worker was created.
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stopping_ = true;
+            wake_.notify_all();
+            snapshot_wake_.notify_all();
+        }
+        if (worker_.joinable()) worker_.join();
+        if (snapshot_worker_.joinable()) snapshot_worker_.join();
         release_files();
         throw;
     }
@@ -150,7 +161,7 @@ void Engine::recover() {
     if (wal_fd_ < 0) io_error("create WAL");
     sync_file(wal_fd_);
     sync_directory(config_.data_dir);
-    snapshot_locked();
+    snapshot();
 }
 
 void Engine::load_snapshot() {
@@ -320,6 +331,22 @@ void Engine::write_batch(const std::deque<PendingRecord>& records) {
     hook("wal.after_sync");
 }
 
+// Caller owns io_mutex_, so no other batch can advance the commit point.
+void Engine::commit_batch(const std::deque<PendingRecord>& records, size_t bytes) {
+    if (records.empty()) return;
+    try {
+        write_batch(records);
+        std::lock_guard<std::mutex> lock(mutex_);
+        durable_sequence_ = records.back().sequence;
+        pending_bytes_ -= bytes;
+        committed_.notify_all();
+    } catch (const std::exception& error) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        fail_locked(error.what());
+        throw;
+    }
+}
+
 void Engine::flush_pending() {
     std::lock_guard<std::mutex> io_lock(io_mutex_);
     try {
@@ -334,11 +361,7 @@ void Engine::flush_pending() {
         }
         // New operations may enter pending_ while this batch is being written.
         // Its bytes stay charged until sync succeeds, maintaining backpressure.
-        write_batch(batch);
-        std::lock_guard<std::mutex> lock(mutex_);
-        durable_sequence_ = batch.back().sequence;
-        pending_bytes_ -= batch_bytes;
-        committed_.notify_all();
+        commit_batch(batch, batch_bytes);
     } catch (const std::exception& error) {
         std::lock_guard<std::mutex> lock(mutex_);
         fail_locked(error.what());
@@ -360,16 +383,14 @@ void Engine::flush_locked() {
     }
 }
 
-void Engine::snapshot_locked() {
-    if (!failure_.empty()) throw std::runtime_error(failure_);
-    flush_locked();
+void Engine::install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence) {
     const std::string temporary = config_.data_dir + "/snapshot.v1.tmp";
     const std::string installed = config_.data_dir + "/snapshot.v1";
     File file(::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600));
     if (file.fd < 0) io_error("create snapshot");
     hook("snapshot.write");
-    write_all(file.fd, snapshot_header(applied_sequence_, kv_.size()));
-    for (const auto& entry : kv_) write_all(file.fd, codec::record(applied_sequence_, Operation::Put, entry.first, entry.second));
+    write_all(file.fd, snapshot_header(sequence, image.size()));
+    for (const auto& entry : image) write_all(file.fd, codec::record(sequence, Operation::Put, entry.first, entry.second));
     hook("snapshot.sync");
     sync_file(file.fd);
     hook("snapshot.rename");
@@ -377,34 +398,99 @@ void Engine::snapshot_locked() {
     hook("snapshot.dir_sync");
     sync_directory(config_.data_dir);
     hook("snapshot.after_install");
-    // Only a durably installed checkpoint permits deleting its WAL prefix.
+}
+
+// The snapshot at boundary is already durable. Retain every subsequent byte,
+// including writes acknowledged while its file was being installed.
+void Engine::compact_wal(int64_t boundary) {
     try {
         hook("wal.truncate");
-        if (::ftruncate(wal_fd_, 0) != 0) io_error("truncate checkpointed WAL");
+        const off_t end = ::lseek(wal_fd_, 0, SEEK_END);
+        if (end < 0) io_error("seek WAL for compaction");
+        if (boundary < 0 || boundary > end) throw std::runtime_error("invalid WAL checkpoint boundary");
+        const std::string temporary = config_.data_dir + "/wal.v1.tmp";
+        const std::string installed = config_.data_dir + "/wal.v1";
+        File replacement(::open(temporary.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0600));
+        if (replacement.fd < 0) io_error("create WAL replacement");
+        hook("wal.compact.write");
+        std::array<char, 64 * 1024> buffer{};
+        off_t offset = static_cast<off_t>(boundary);
+        while (offset < end) {
+            const size_t size = static_cast<size_t>(std::min<off_t>(buffer.size(), end - offset));
+            const ssize_t count = ::pread(wal_fd_, buffer.data(), size, offset);
+            if (count < 0 && errno == EINTR) continue;
+            if (count < 0) io_error("read WAL suffix");
+            if (count == 0) throw std::runtime_error("WAL suffix ended unexpectedly");
+            write_all(replacement.fd, std::string_view(buffer.data(), static_cast<size_t>(count)));
+            offset += count;
+        }
+        hook("wal.compact.sync");
+        sync_file(replacement.fd);
+        hook("wal.compact.rename");
+        if (::rename(temporary.c_str(), installed.c_str()) != 0) io_error("install WAL replacement");
+        // Once renamed, appends must use the new inode even if directory sync
+        // fails. Swap descriptors before any throwing hook or syscall.
+        const int previous = wal_fd_;
+        wal_fd_ = replacement.fd;
+        replacement.fd = -1;
+        ::close(previous);
+        hook("wal.compact.after_replace");
         hook("wal.after_truncate");
-        sync_file(wal_fd_);
-        durable_sequence_ = applied_sequence_;
-        committed_.notify_all();
+        hook("wal.compact.dir_sync");
+        sync_directory(config_.data_dir);
     } catch (const std::exception& error) {
+        std::lock_guard<std::mutex> lock(mutex_);
         fail_locked(error.what());
         throw;
     }
 }
 
 void Engine::snapshot() {
-    std::lock_guard<std::mutex> io_lock(io_mutex_);
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (stopping_) throw std::runtime_error("engine is stopping");
-    snapshot_locked();
+    std::lock_guard<std::mutex> snapshot_lock(snapshot_mutex_);
+    std::unique_lock<std::mutex> io_lock(io_mutex_);
+    std::unordered_map<std::string, std::string> image;
+    std::deque<PendingRecord> batch;
+    size_t batch_bytes;
+    uint64_t sequence;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (stopping_) throw std::runtime_error("engine is stopping");
+        if (!failure_.empty()) throw std::runtime_error(failure_);
+        // Copy before detaching: an allocation failure leaves the queue intact.
+        image = kv_;
+        sequence = applied_sequence_;
+        batch.swap(pending_);
+        batch_bytes = pending_bytes_;
+    }
+    commit_batch(batch, batch_bytes);
+    const off_t boundary = ::lseek(wal_fd_, 0, SEEK_END);
+    if (boundary < 0) io_error("seek WAL checkpoint boundary");
+    io_lock.unlock();
+    batch.clear();
+    install_snapshot(image, sequence);
+    io_lock.lock();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!failure_.empty()) throw std::runtime_error(failure_);
+    }
+    compact_wal(boundary);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Legacy import can contain snapshot-only state. Never rewind a newer
+        // WAL commit made while the snapshot was being written.
+        durable_sequence_ = std::max(durable_sequence_, sequence);
+        committed_.notify_all();
+    }
+    // Destroying a large captured map should not pause the WAL writer either.
+    io_lock.unlock();
 }
 
 void Engine::background_work() {
     using Clock = std::chrono::steady_clock;
     std::unique_lock<std::mutex> lock(mutex_);
     auto flush_at = Clock::now() + config_.wal_flush_interval;
-    auto snapshot_at = config_.snapshot_interval.count() == 0 ? Clock::time_point::max() : Clock::now() + config_.snapshot_interval;
     while (!stopping_) {
-        wake_.wait_until(lock, std::min(flush_at, snapshot_at), [this] {
+        wake_.wait_until(lock, flush_at, [this] {
             return stopping_ || pending_.size() >= config_.wal_batch_size;
         });
         if (stopping_) break;
@@ -416,15 +502,19 @@ void Engine::background_work() {
             lock.lock();
             flush_at = Clock::now() + config_.wal_flush_interval;
         }
-        if (stopping_) break;
-        if (failure_.empty() && Clock::now() >= snapshot_at) {
-            lock.unlock();
-            try { snapshot(); }
-            catch (const std::exception& error) { std::cerr << "snapshot failed: " << error.what() << '\n'; }
-            lock.lock();
-            snapshot_at = Clock::now() + config_.snapshot_interval;
-        }
         if (!failure_.empty()) wake_.wait(lock, [this] { return stopping_; });
+    }
+}
+
+void Engine::background_snapshots() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!stopping_) {
+        if (snapshot_wake_.wait_for(lock, config_.snapshot_interval, [this] { return stopping_; })) break;
+        if (!failure_.empty()) continue;
+        lock.unlock();
+        try { snapshot(); }
+        catch (const std::exception& error) { std::cerr << "snapshot failed: " << error.what() << '\n'; }
+        lock.lock();
     }
 }
 
@@ -441,9 +531,12 @@ void Engine::close() {
         if (closed_) return;
         stopping_ = true;
         wake_.notify_all();
+        snapshot_wake_.notify_all();
         committed_.notify_all();
     }
     if (worker_.joinable()) worker_.join();
+    if (snapshot_worker_.joinable()) snapshot_worker_.join();
+    std::lock_guard<std::mutex> snapshot_lock(snapshot_mutex_);
     std::lock_guard<std::mutex> io_lock(io_mutex_);
     std::lock_guard<std::mutex> lock(mutex_);
     if (failure_.empty()) {

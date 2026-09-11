@@ -2,7 +2,7 @@
 
 MiniKV 是一个使用 C++17 存储引擎和 Go HTTP 网关的单机键值存储项目。数据驻留内存，WAL 与快照负责持久化和恢复。
 
-目前支持 PUT / GET / DELETE、带校验和的 WAL 与快照、批量同步提交、非阻塞 TCP 连接管理，以及故障恢复测试。
+目前支持 PUT / GET / DELETE、带校验和的 WAL 与快照、批量同步提交、并发快照、非阻塞 TCP 连接管理，以及故障恢复测试。
 
 ## 构建
 
@@ -73,9 +73,9 @@ key 为 1–4096 字节，value 为 0–1 MiB。JSON 字符串中的换行、冒
 
 - `throughput`：内存更新、WAL 入队后返回，尚未同步的写入可能在故障中丢失。这是默认模式。
 - `reliable`：WAL 完成 `fdatasync` 后才确认写入；多个请求可共享一次同步。GET 也会等待其观察到的状态持久化。
-- 快照按“写临时文件 → 同步文件 → rename → 同步目录 → 回收旧 WAL”安装。
+- 快照复制确定序列的内存数据后，在状态锁之外写盘；独立的 WAL 刷新线程继续提交新写入。快照持久化后，原子替换 WAL，只保留快照序列之后的日志。
 - WAL 尾部不完整记录可截断修复；校验和错误、日志序列缺失和快照损坏会导致启动失败。
-- 存储 I/O 失败会使引擎拒绝后续请求并输出错误，不会把失败的记录标记为已同步。
+- WAL 写入、同步或替换失败会使引擎拒绝后续请求并输出错误，不会把失败的记录标记为已同步。快照文件安装失败时保留原 WAL，后台会记录错误并在后续周期重试。
 
 详细的提交顺序、文件格式、故障模型与实现限制见 [设计说明](docs/design.md)。
 
@@ -90,6 +90,7 @@ make sanitize-test
 
 - C++ 存储恢复、并发写入与快照、group commit、并发关闭、日志截断和校验和检查。
 - 暂停 WAL 同步时的请求进展、未同步批次容量限制、逐批确认和关闭时排空。
+- 快照写盘期间的可靠读写、自动快照、WAL 后缀复制与替换故障、关闭后再次恢复。
 - 缺失快照时拒绝误建空库、恢复已被快照覆盖的 WAL 后继续写入并再次重启。
 - WAL/快照 I/O 故障注入、真实短写/EFBIG、多个快照边界的进程退出。
 - Go 网关参数校验、连接池总量上限、请求取消、超时分类和写请求不重试；启用 race 检查。
@@ -104,8 +105,14 @@ make sanitize-test
 cmake -S cpp_engine -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
   '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
   -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
-cmake --build build-tsan --target engine_test -j2
+cmake --build build-tsan --target engine_test snapshot_test -j2
 TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
+```
+
+若 TSan 在测试启动前报告 `unexpected memory mapping`，在支持 `setarch` 的 x86_64 Linux 环境中可仅对测试进程关闭地址随机化后重试，例如：
+
+```sh
+setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 ./build-tsan/snapshot_test
 ```
 
 ## 压测
@@ -125,7 +132,9 @@ TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
 
 对比实验应固定硬件、构建类型、持久化模式、批量参数、数据量、value 大小、随机种子和命中率，并保存服务启动配置。压测默认采用固定并发的闭环负载；应另做固定到达速率的过载实验，不能仅凭闭环 P99 判断容量。
 
-后台 WAL 写入和同步已移出状态锁；吞吐模式请求可在同步期间继续执行，可靠模式仍等待对应批次持久化。快照制作仍持有状态锁。测试快照影响时，可用 `MINIKV_SNAPSHOT_INTERVAL_MS=1000` 缩短周期，并运行覆盖多个周期的负载，单独测量其对尾延迟的影响。锁顺序与容量约束见 [设计说明](docs/design.md#wal-io-与状态锁)。
+后台 WAL 写入和同步已移出状态锁；吞吐模式请求可在同步期间继续执行，可靠模式仍等待对应批次持久化。快照文件写入期间，读写请求和 WAL 提交也可继续执行。复制内存数据仍需持有状态锁并额外占用一份数据集的内存；最后重写 WAL 后缀时会暂停其他 WAL I/O，可靠模式请求可能等待该步骤完成。
+
+测试快照影响时，可用 `MINIKV_SNAPSHOT_INTERVAL_MS=1000` 缩短周期，并运行覆盖多个周期的负载，记录数据集大小、快照耗时、内存峰值和尾延迟。并发设计不代表已有实测性能收益；锁顺序与容量约束见 [设计说明](docs/design.md#wal-io-与状态锁)。此次优化保持 v1 文件格式、协议和默认配置不变，已有 `snapshot.v1` / `wal.v1` 可直接恢复。
 
 `benmark/out/` 中的现有数据与图表属于修复前版本，不代表新版性能。绘图依赖 Matplotlib：
 
