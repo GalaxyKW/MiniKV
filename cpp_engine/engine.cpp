@@ -312,14 +312,44 @@ Response Engine::execute(const Request& request) {
     return {status, {}};
 }
 
+void Engine::write_batch(const std::deque<PendingRecord>& records) {
+    hook("wal.write");
+    for (const auto& record : records) write_all(wal_fd_, record.bytes);
+    hook("wal.sync");
+    sync_file(wal_fd_);
+    hook("wal.after_sync");
+}
+
+void Engine::flush_pending() {
+    std::lock_guard<std::mutex> io_lock(io_mutex_);
+    try {
+        std::deque<PendingRecord> batch;
+        size_t batch_bytes;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!failure_.empty()) throw std::runtime_error(failure_);
+            if (pending_.empty()) return;
+            batch.swap(pending_);
+            batch_bytes = pending_bytes_;
+        }
+        // New operations may enter pending_ while this batch is being written.
+        // Its bytes stay charged until sync succeeds, maintaining backpressure.
+        write_batch(batch);
+        std::lock_guard<std::mutex> lock(mutex_);
+        durable_sequence_ = batch.back().sequence;
+        pending_bytes_ -= batch_bytes;
+        committed_.notify_all();
+    } catch (const std::exception& error) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        fail_locked(error.what());
+        throw;
+    }
+}
+
 void Engine::flush_locked() {
     if (pending_.empty()) return;
     try {
-        hook("wal.write");
-        for (const auto& record : pending_) write_all(wal_fd_, record.bytes);
-        hook("wal.sync");
-        sync_file(wal_fd_);
-        hook("wal.after_sync");
+        write_batch(pending_);
         durable_sequence_ = pending_.back().sequence;
         pending_.clear();
         pending_bytes_ = 0;
@@ -362,6 +392,7 @@ void Engine::snapshot_locked() {
 }
 
 void Engine::snapshot() {
+    std::lock_guard<std::mutex> io_lock(io_mutex_);
     std::lock_guard<std::mutex> lock(mutex_);
     if (stopping_) throw std::runtime_error("engine is stopping");
     snapshot_locked();
@@ -379,13 +410,18 @@ void Engine::background_work() {
         if (stopping_) break;
         const auto now = Clock::now();
         if (now >= flush_at || pending_.size() >= config_.wal_batch_size) {
-            try { flush_locked(); }
-            catch (const std::exception&) { /* flush_locked records the terminal failure. */ }
+            lock.unlock();
+            try { flush_pending(); }
+            catch (const std::exception&) { /* flush_pending records the terminal failure. */ }
+            lock.lock();
             flush_at = Clock::now() + config_.wal_flush_interval;
         }
-        if (failure_.empty() && now >= snapshot_at) {
-            try { snapshot_locked(); }
+        if (stopping_) break;
+        if (failure_.empty() && Clock::now() >= snapshot_at) {
+            lock.unlock();
+            try { snapshot(); }
             catch (const std::exception& error) { std::cerr << "snapshot failed: " << error.what() << '\n'; }
+            lock.lock();
             snapshot_at = Clock::now() + config_.snapshot_interval;
         }
         if (!failure_.empty()) wake_.wait(lock, [this] { return stopping_; });
@@ -408,6 +444,7 @@ void Engine::close() {
         committed_.notify_all();
     }
     if (worker_.joinable()) worker_.join();
+    std::lock_guard<std::mutex> io_lock(io_mutex_);
     std::lock_guard<std::mutex> lock(mutex_);
     if (failure_.empty()) {
         try { flush_locked(); }

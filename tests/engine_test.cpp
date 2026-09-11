@@ -135,6 +135,182 @@ void group_commit() {
     require(syncs == 1 && engine.durable_sequence() == 8, "writes did not share one durable commit");
 }
 
+// Pause the first WAL sync at a real I/O boundary. The timeout bounds cleanup
+// if a test exits early; assertions normally run only after release().
+struct WalSyncGate {
+    std::promise<void> entered, resume;
+    std::future<void> waiting = entered.get_future();
+    std::shared_future<void> resumed = resume.get_future().share();
+    std::atomic<bool> used{false};
+    bool fail = false;
+
+    void operator()(const std::string& point) {
+        if (point != "wal.sync" || used.exchange(true)) return;
+        entered.set_value();
+        if (resumed.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+            throw std::runtime_error("test timed out releasing WAL sync");
+        }
+        if (fail) throw std::runtime_error("injected in-flight sync failure");
+    }
+
+    bool wait() { return waiting.wait_for(std::chrono::seconds(2)) == std::future_status::ready; }
+    void release() { resume.set_value(); }
+};
+
+void wal_io_allows_throughput_progress() {
+    TempDir dir;
+    auto config = config_for(dir);
+    config.wal_mode = WalMode::Throughput;
+    config.wal_batch_size = 1;
+    WalSyncGate gate;
+    config.io_hook = [&](const std::string& point) { gate(point); };
+    {
+        Engine engine(config);
+        put(engine, "first", "one");
+        const bool syncing = gate.wait();
+        // A snapshot waiting for the WAL writer must not hold the state lock.
+        auto checkpoint = std::async(std::launch::async, [&] { engine.snapshot(); });
+        auto writer = std::async(std::launch::async, [&] { put(engine, "second", "two"); });
+        auto reader = std::async(std::launch::async, [&] { return get(engine, "first"); });
+        const bool wrote = writer.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+        const bool read = reader.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+        const bool snapshot_waited = checkpoint.wait_for(std::chrono::milliseconds(20)) == std::future_status::timeout;
+        gate.release();
+        writer.get();
+        const auto value = reader.get();
+        checkpoint.get();
+        require(syncing && snapshot_waited, "snapshot did not serialize with in-flight WAL");
+        require(wrote && read, "WAL I/O blocked throughput requests");
+        require(value.status == Status::Value && value.value == "one", "concurrent read changed data");
+        put(engine, "after", "checkpoint");
+        engine.close();
+    }
+    config.io_hook = {};
+    Engine recovered(config);
+    require(get(recovered, "first").value == "one" && get(recovered, "second").value == "two" &&
+            get(recovered, "after").value == "checkpoint", "overlapping flush and snapshot lost writes");
+}
+
+void in_flight_wal_counts_toward_queue_limit() {
+    TempDir dir;
+    auto config = config_for(dir);
+    config.wal_mode = WalMode::Throughput;
+    config.wal_batch_size = 1;
+    config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+    WalSyncGate gate;
+    config.io_hook = [&](const std::string& point) { gate(point); };
+    Engine engine(config);
+    const std::string key(kMaxKeySize, 'k');
+    put(engine, key, std::string(kMaxValueSize, 'v'));
+    const bool syncing = gate.wait();
+    auto writer = std::async(std::launch::async, [&] { put(engine, "next", "value"); });
+    auto reader = std::async(std::launch::async, [&] { return get(engine, key); });
+    const bool bounded = writer.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout;
+    const bool read = reader.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+    gate.release();
+    writer.get();
+    const auto value = reader.get();
+    require(syncing && bounded, "in-flight WAL stopped counting toward the queue byte limit");
+    require(read && value.status == Status::Value && value.value.size() == kMaxValueSize,
+            "WAL backpressure unnecessarily blocked reads");
+    engine.close();
+    config.io_hook = {};
+    Engine recovered(config);
+    require(get(recovered, "next").value == "value", "backpressured write was lost");
+}
+
+void in_flight_wal_preserves_reliable_acknowledgements() {
+    for (bool fail : {false, true}) {
+        TempDir dir;
+        auto config = config_for(dir);
+        config.wal_batch_size = 1;
+        WalSyncGate gate, following_gate;
+        gate.fail = fail;
+        std::atomic<int> syncs{0};
+        config.io_hook = [&](const std::string& point) {
+            if (point != "wal.sync") return;
+            const auto batch = syncs.fetch_add(1);
+            if (batch == 0) gate(point);
+            else if (batch == 1) following_gate(point);
+        };
+        Engine engine(config);
+        auto first = std::async(std::launch::async, [&] { return engine.execute({Operation::Put, "first", "one"}); });
+        const bool syncing = gate.wait();
+        auto second = std::async(std::launch::async, [&] { return engine.execute({Operation::Put, "second", "two"}); });
+        auto reader = std::async(std::launch::async, [&] { return get(engine, "first"); });
+        auto sequence = std::async(std::launch::async, [&] { return engine.durable_sequence(); });
+        const bool first_waited = first.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+        const bool second_waited = second.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+        const bool read_waited = reader.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+        const bool state_available = sequence.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+        gate.release();
+        bool first_batch_only = true;
+        if (!fail) {
+            // Keep batch 2 unsynced after batch 1 commits: its acknowledgement
+            // must not be released by advancing to the latest applied sequence.
+            const bool following_syncing = following_gate.wait();
+            auto committed = std::async(std::launch::async, [&] { return engine.durable_sequence(); });
+            auto dependent_read = std::async(std::launch::async, [&] { return get(engine, "second"); });
+            const bool first_done = first.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+            const bool second_pending = second.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+            const bool read_pending = dependent_read.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+            const bool can_observe = committed.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+            following_gate.release();
+            const auto committed_sequence = committed.get();
+            const auto value = dependent_read.get();
+            first_batch_only = following_syncing && first_done && second_pending && read_pending && can_observe &&
+                               committed_sequence == 1 && value.status == Status::Value && value.value == "two";
+        }
+        const auto first_result = first.get(), second_result = second.get(), read_result = reader.get();
+        const auto before_sync = sequence.get();
+        require(syncing && state_available && before_sync == 0, "in-flight I/O locked state or advanced the commit point");
+        require(first_waited && second_waited && read_waited, "reliable request returned before sync");
+        require(first_batch_only, "one WAL batch acknowledged a later, unsynced operation");
+        if (fail) {
+            require(first_result.status == Status::IOError && second_result.status == Status::IOError &&
+                    read_result.status == Status::IOError && engine.durable_sequence() == 0,
+                    "failed in-flight batch was acknowledged");
+            require(engine.execute({Operation::Put, "later", "value"}).status == Status::IOError,
+                    "writes continued after in-flight WAL failure");
+            must_fail([&] { engine.snapshot(); }, "snapshot bypassed in-flight WAL failure");
+            must_fail([&] { engine.close(); }, "close hid in-flight WAL failure");
+        } else {
+            require(first_result.status == Status::Ok && second_result.status == Status::Ok &&
+                    read_result.status == Status::Value && read_result.value == "one" && engine.durable_sequence() == 2,
+                    "successful batches did not acknowledge in sequence");
+            engine.close();
+            config.io_hook = {};
+            Engine recovered(config);
+            require(get(recovered, "first").value == "one" && get(recovered, "second").value == "two",
+                    "reliable in-flight writes did not recover");
+        }
+    }
+}
+
+void close_drains_in_flight_and_queued_wal() {
+    TempDir dir;
+    auto config = config_for(dir);
+    config.wal_mode = WalMode::Throughput;
+    config.wal_batch_size = 1;
+    WalSyncGate gate;
+    config.io_hook = [&](const std::string& point) { gate(point); };
+    Engine engine(config);
+    put(engine, "first", "one");
+    const bool syncing = gate.wait();
+    auto writer = std::async(std::launch::async, [&] { put(engine, "queued", "two"); });
+    const bool queued = writer.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+    auto closer = std::async(std::launch::async, [&] { engine.close(); });
+    const bool close_waited = closer.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+    gate.release();
+    writer.get();
+    closer.get();
+    require(syncing && queued && close_waited, "close did not drain an overlapping WAL flush");
+    config.io_hook = {};
+    Engine recovered(config);
+    require(get(recovered, "first").value == "one" && get(recovered, "queued").value == "two",
+            "close lost in-flight or queued WAL records");
+}
+
 void wal_failures() {
     for (const std::string point : {"wal.write", "wal.sync"}) {
         TempDir dir;
@@ -354,6 +530,10 @@ int main(int argc, char** argv) {
             {"missing snapshot", missing_snapshot_with_empty_wal},
             {"checkpointed WAL tail", checkpointed_wal_tail_can_accept_new_writes},
             {"concurrent close", concurrent_close},
+            {"WAL I/O progress", wal_io_allows_throughput_progress},
+            {"in-flight WAL queue limit", in_flight_wal_counts_toward_queue_limit},
+            {"in-flight WAL acknowledgements", in_flight_wal_preserves_reliable_acknowledgements},
+            {"in-flight WAL close", close_drains_in_flight_and_queued_wal},
         };
         size_t executed = 0;
         for (const auto& test : tests) {

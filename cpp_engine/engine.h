@@ -64,6 +64,9 @@ private:
     void load_snapshot();
     void load_wal();
     void import_legacy();
+    void write_batch(const std::deque<PendingRecord>& records);
+    void flush_pending();
+    // Once the worker is running, these require both I/O and state locks.
     void flush_locked();
     void snapshot_locked();
     void background_work();
@@ -73,12 +76,15 @@ private:
 
     EngineConfig config_;
     std::mutex close_mutex_;
+    // Acquire I/O before state when both are needed; never wait for I/O while
+    // holding mutex_. Background WAL writes release mutex_ during file I/O.
+    std::mutex io_mutex_;
     mutable std::mutex mutex_;
     std::condition_variable wake_;
     std::condition_variable committed_;
     std::unordered_map<std::string, std::string> kv_;
     std::deque<PendingRecord> pending_;
-    size_t pending_bytes_ = 0;
+    size_t pending_bytes_ = 0; // Queued plus in-flight, not-yet-synced WAL bytes.
     uint64_t applied_sequence_ = 0;
     uint64_t durable_sequence_ = 0;
     int wal_fd_ = -1;

@@ -89,6 +89,7 @@ make sanitize-test
 测试包含：
 
 - C++ 存储恢复、并发写入与快照、group commit、并发关闭、日志截断和校验和检查。
+- 暂停 WAL 同步时的请求进展、未同步批次容量限制、逐批确认和关闭时排空。
 - 缺失快照时拒绝误建空库、恢复已被快照覆盖的 WAL 后继续写入并再次重启。
 - WAL/快照 I/O 故障注入、真实短写/EFBIG、多个快照边界的进程退出。
 - Go 网关参数校验、连接池总量上限、请求取消、超时分类和写请求不重试；启用 race 检查。
@@ -96,6 +97,16 @@ make sanitize-test
 - AddressSanitizer 和 UndefinedBehaviorSanitizer 检查。
 
 测试使用独立临时目录和本机临时端口。进程退出测试不等同于真实断电测试；硬件持久性依赖文件系统和设备正确执行同步操作。CI 会执行上述两组命令。
+
+检查 C++ 存储并发中的数据竞争：
+
+```sh
+cmake -S cpp_engine -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+  '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
+  -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
+cmake --build build-tsan --target engine_test -j2
+TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
+```
 
 ## 压测
 
@@ -114,7 +125,7 @@ make sanitize-test
 
 对比实验应固定硬件、构建类型、持久化模式、批量参数、数据量、value 大小、随机种子和命中率，并保存服务启动配置。压测默认采用固定并发的闭环负载；应另做固定到达速率的过载实验，不能仅凭闭环 P99 判断容量。
 
-测试快照影响时，可用 `MINIKV_SNAPSHOT_INTERVAL_MS=1000` 缩短周期，并运行覆盖多个周期的负载。当前刷盘和快照仍持有存储锁，后台 I/O 对尾延迟的影响需要单独测量。
+后台 WAL 写入和同步已移出状态锁；吞吐模式请求可在同步期间继续执行，可靠模式仍等待对应批次持久化。快照制作仍持有状态锁。测试快照影响时，可用 `MINIKV_SNAPSHOT_INTERVAL_MS=1000` 缩短周期，并运行覆盖多个周期的负载，单独测量其对尾延迟的影响。锁顺序与容量约束见 [设计说明](docs/design.md#wal-io-与状态锁)。
 
 `benmark/out/` 中的现有数据与图表属于修复前版本，不代表新版性能。绘图依赖 Matplotlib：
 
