@@ -57,6 +57,8 @@ data/*.log
 data/LOCK
 data/*.v1
 data/*.tmp
+/data-demo/
+/data-snapshot-bench/
 __pycache__/
 
 # editor

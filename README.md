@@ -1,175 +1,204 @@
 # MiniKV
 
-MiniKV 是一个使用 C++17 存储引擎和 Go HTTP 网关的单机键值存储项目。数据驻留内存，WAL 与快照负责持久化和恢复。
+**C++17 存储引擎 · Go HTTP 网关 · 单机持久化 KV**
 
-目前支持 PUT / GET / DELETE、带校验和的 WAL 与快照、批量同步提交、并发快照、非阻塞 TCP 连接管理，以及故障恢复测试。
+MiniKV 将数据保存在内存中，通过 WAL（预写日志）与快照完成持久化和恢复。项目围绕三个问题展开：**写入何时可以确认成功、后台 I/O 如何与请求并行、故障后如何验证数据仍然正确。**
 
-## 构建
+[快速开始](#快速开始) · [系统架构](#系统架构) · [设计与取舍](#关键设计与取舍) · [测试](#正确性如何验证) · [压测](#可复现压测) · [后续路线](#后续路线)
 
-需要 Linux、支持 C++17 的编译器、CMake 3.16+、Go 1.22+ 和 Python 3。引擎使用 Linux 的 epoll、eventfd 和 flock；Go 程序没有第三方模块依赖。
+- **明确的提交语义**：提供 `throughput` 与 `reliable` 两种模式，区分内存可见和 WAL 已同步。
+- **并发持久化**：WAL 批量提交，快照文件写盘期间继续处理请求和提交 WAL，回收时保留快照生成期间的新日志。
+- **可重复的故障验证**：在写入、同步、rename 等边界注入失败或退出进程，再通过重启、读取和继续写入检查恢复结果。
+
+## 系统架构
+
+```mermaid
+flowchart TB
+    Client["curl / minikv-bench"] -->|HTTP| Gateway
+    subgraph Go["Go 网关"]
+        Gateway["JSON 校验 / HTTP 响应"] --> Pool["有界 RPC 连接池 / 请求截止时间"]
+    end
+    Pool -->|TCP 二进制帧| Reactor
+    subgraph CPP["C++ 存储引擎"]
+        Reactor["epoll：连接与收发缓冲"] --> Workers["有界任务队列 / 工作线程"]
+        Workers --> State["内存 KV / 有序 WAL 队列"]
+        State -.-> Flush["WAL 线程：批量写入与同步"]
+        State -.->|复制序列 S 的状态| Snapshot["快照线程：写出与安装"]
+    end
+    Flush --> WAL[("wal.v1")]
+    Snapshot --> Image[("snapshot.v1")]
+    Snapshot -.->|原子保留 S 之后的日志| WAL
+```
+
+实线展示请求与文件写入路径，虚线展示后台持久化和日志回收。快照按周期触发，也可由引擎内部接口调用。
+
+Go 网关负责 HTTP 参数校验、超时和连接复用；C++ 引擎负责请求调度、内存状态与持久化。TCP 使用带长度和状态码的二进制帧；`epoll` 管理连接收发，完整请求才进入工作队列，因此空闲连接和半包不会占住工作线程。
+
+## 快速开始
+
+### 1. 构建
+
+需要 **Linux、C++17 编译器、CMake 3.16+、Make 和 Go 1.22+**。引擎依赖 Linux 的 `epoll`、`eventfd` 和 `flock`；Go 程序没有第三方模块依赖。端到端测试另需 Python 3，以下 HTTP 示例使用 curl。
 
 ```sh
 git clone https://github.com/GalaxyKW/MiniKV.git
 cd MiniKV
-make
+make JOBS=4
 ```
 
-生成文件：
+生成 `build/engine`、`bin/minikv-go` 和 `bin/minikv-bench`。以下命令均在**仓库根目录**执行。
 
-- `build/engine`：C++ 引擎。
-- `bin/minikv-go`：HTTP 网关。
-- `bin/minikv-bench`：压测工具。
+### 2. 启动两个进程
 
-构建产物不提交到源码仓库。可以用 `make JOBS=4` 调整编译并行度。
-
-## 启动
-
-在项目根目录启动引擎：
+终端 A：启动引擎，使用独立的演示数据目录。
 
 ```sh
-MINIKV_DATA_DIR=./data \
+MINIKV_DATA_DIR=./data-demo \
 MINIKV_WAL_MODE=reliable \
 MINIKV_WAL_FLUSH_MS=2 \
 ./build/engine
 ```
 
-在另一个终端的项目根目录启动网关：
+看到 `MiniKV engine listening on 127.0.0.1:9090` 后，在终端 B 启动网关：
 
 ```sh
-./bin/minikv-go
+MINIKV_HTTP_ADDR=127.0.0.1:8080 ./bin/minikv-go
 ```
 
-引擎默认监听 `127.0.0.1:9090`，网关默认监听 `:8080`。SIGINT/SIGTERM 会停止接入，给已接纳请求最多 5 秒发送响应，然后等待存储任务完成并同步待提交 WAL；磁盘阻塞可能延长退出时间。停止服务时先停网关，再停引擎。
+示例选择 `reliable` 模式和 2 ms 刷新触发间隔，程序默认值是 `throughput` 和 100 ms。网关示例仅监听本机；其默认地址 `:8080` 会监听所有接口。完整参数见[使用与配置](docs/usage.md#配置参考)。
 
-已有旧版 `data.db` / `wal.log` 时，需要先停止旧进程、备份目录，再运行 `MINIKV_DATA_DIR=./data ./build/engine --import-legacy`。原文件保留，新文件使用 `snapshot.v1` / `wal.v1`。引擎与网关需要一起更新；迁移边界见 [设计与迁移说明](docs/design.md#旧版数据迁移)。
+如需打开旧版 `data.db` / `wal.log`，先按[迁移步骤](docs/usage.md#旧版数据迁移)操作。
 
-## HTTP API
+### 3. 写入并读回
+
+在终端 C 执行。存储操作 PUT 对应 **HTTP POST**，相同 key 会覆盖旧值。
 
 ```sh
-curl -X POST http://127.0.0.1:8080/kv \
+curl -fsS -X POST http://127.0.0.1:8080/kv \
   -H 'Content-Type: application/json' \
-  -d '{"key":"tenant:1","value":"hello\nworld  "}'
-
-curl 'http://127.0.0.1:8080/kv?key=tenant%3A1'
-
-curl -X DELETE 'http://127.0.0.1:8080/kv?key=tenant%3A1'
+  -d '{"key":"hello","value":"MiniKV"}'
 ```
 
-key 为 1–4096 字节，value 为 0–1 MiB。JSON 字符串中的换行、冒号、NUL 和尾部空白会被保留。GET/DELETE 的 key 使用 URL 编码。
+预期输出：
 
-| 结果 | HTTP 状态 | 文本响应 |
-| --- | ---: | --- |
-| PUT/DELETE 成功 | 200 | `OK\n` |
-| GET 命中 | 200 | `VALUE ` + 原值 + 一个换行 |
-| GET/DELETE 未命中 | 404 | `NOT_FOUND\n` |
-| 参数或 JSON 无效 | 400 | 错误说明 |
-| value 或请求体过大 | 413 | 错误说明 |
-| 存储 I/O 失败或请求队列已满 | 503 | 错误说明 |
-| 后端通信失败 / 超时 | 502 / 504 | 错误说明 |
+```text
+OK
+```
 
-读取值时只移除固定的 `VALUE ` 前缀和最后一个换行，不要对整个响应做 trim。网络失败时写入可能已执行，因此网关不自动重试写请求。
+```sh
+curl -fsS 'http://127.0.0.1:8080/kv?key=hello'
+```
 
-## 持久化保证
+预期输出：
 
-- `throughput`：内存更新、WAL 入队后返回，尚未同步的写入可能在故障中丢失。这是默认模式。
-- `reliable`：WAL 完成 `fdatasync` 后才确认写入；多个请求可共享一次同步。GET 也会等待其观察到的状态持久化。
-- 快照复制确定序列的内存数据后，在状态锁之外写盘；独立的 WAL 刷新线程继续提交新写入。快照持久化后，原子替换 WAL，只保留快照序列之后的日志。
-- WAL 尾部不完整记录可截断修复；校验和错误、日志序列缺失和快照损坏会导致启动失败。
-- WAL 写入、同步或替换失败会使引擎拒绝后续请求并输出错误，不会把失败的记录标记为已同步。快照文件安装失败时保留原 WAL，后台会记录错误并在后续周期重试。
+```text
+VALUE MiniKV
+```
 
-详细的提交顺序、文件格式、故障模型与实现限制见 [设计说明](docs/design.md)。
+### 4. 验证重启恢复，再删除
 
-## 测试
+先在终端 B 按 Ctrl+C，等待网关退出；再在终端 A 按 Ctrl+C，等待引擎退出。保留 `./data-demo`，重新执行第 2 步的两条启动命令，再执行 GET，应仍得到 `VALUE MiniKV`。
+
+这个演示验证正常关闭后的恢复；进程强制终止和 I/O 失败由下文的故障测试覆盖。关闭时会同步剩余 WAL，磁盘阻塞可能延长退出时间。
+
+```sh
+curl -fsS -X DELETE 'http://127.0.0.1:8080/kv?key=hello'
+curl -sS -w 'HTTP %{http_code}\n' 'http://127.0.0.1:8080/kv?key=hello'
+```
+
+预期输出：
+
+```text
+OK
+NOT_FOUND
+HTTP 404
+```
+
+key 为 1–4096 字节，value 为 0–1 MiB。GET/DELETE 的 key 使用 URL 编码；读取值时只移除 `VALUE ` 前缀和响应末尾的一个换行，以保留值本身的空白。完整响应格式与错误码见 [HTTP API](docs/usage.md#http-api)。
+
+## 关键设计与取舍
+
+### 成功响应意味着什么
+
+| 模式 | PUT / DELETE 何时确认 | GET 行为 | 故障后的边界 |
+| --- | --- | --- | --- |
+| `throughput`（默认） | 内存更新且 WAL 入队 | 返回当前内存值 | 尚未同步的写入可能丢失 |
+| `reliable` | 对应 WAL 批次完成 `fdatasync` | 等待读取时观察到的全局序列持久化 | 已确认写入的持久性依赖文件系统与设备履行同步约定 |
+
+多个写请求可以共享一次同步（group commit）。刷新间隔是触发条件，磁盘耗时与排队也影响提交时间，不能据此承诺固定的最大数据丢失窗口。
+
+超时、断连或客户端取消后，写入结果可能未知；停止等待不会撤销已提交给引擎的操作。网关不自动重试 PUT / DELETE，GET 最多在原超时预算内重试一次。
+
+### 为什么这样实现
+
+| 问题 | 实现方式 | 代价与限制 |
+| --- | --- | --- |
+| 日志顺序与内存状态如何一致 | 在状态锁内分配日志序列、加入 WAL 队列并更新内存 | 内存操作仍串行化；可靠 GET 可能等待其他 key 的写入 |
+| 慢磁盘如何影响请求 | WAL 线程在状态锁外写入并同步，正在同步的批次仍计入队列额度 | 队列满时写请求等待；可靠模式仍受磁盘延迟约束 |
+| 快照期间的新写入如何保留 | 复制序列 S 的状态，持久化快照后原子替换 WAL，保留 S 之后的日志 | 复制数据仍持有状态锁并需要额外内存；重写 WAL 后缀会暂停其他 WAL I/O |
+| 半包与过载如何处理 | `epoll` 收齐帧后派发；连接数、任务队列和 RPC 池均有上限 | 各层通过等待、BUSY 或关闭新连接限制负载；容量并非无限 |
+| 如何避免把损坏当作空库 | 检查 CRC、连续日志序列和文件组合，仅修复不完整 WAL 尾记录 | 完整记录损坏或关键文件缺失时拒绝启动，需要检查存储并恢复备份 |
+
+快照文件安装失败时保留原 WAL，允许后续重试；WAL 写入、同步或替换失败会使引擎拒绝后续请求。文件格式、锁顺序与恢复边界见[存储与协议设计](docs/design.md)。
+
+## 正确性如何验证
 
 ```sh
 make test
 make sanitize-test
 ```
 
-测试包含：
+| 要验证的行为 | 验证方法 | 测试入口 |
+| --- | --- | --- |
+| WAL 顺序、批次确认与队列额度 | 并发读写、暂停同步、排空后重启读取 | [engine_test.cpp](tests/engine_test.cpp) |
+| 快照不丢失并发写入 | 暂停快照写盘，完成可靠读写，再恢复并检查 WAL 后缀 | [snapshot_test.cpp](tests/snapshot_test.cpp) |
+| 失败后不会静默接受损坏 | I/O 故障注入、真实短写/EFBIG、安装边界退出进程、重复恢复 | [存储测试](tests/engine_test.cpp)、[快照测试](tests/snapshot_test.cpp) |
+| HTTP 与 RPC 契约 | 参数、错误码、连接池、取消、超时与重试测试，启用 Go race 检查 | [main_test.go](go_server/main_test.go)、[client_test.go](go_server/client_test.go) |
+| 两个进程协同工作 | TCP 分片与流水线、1 MiB value、RST、过载、停机响应、SIGKILL 后恢复 | [integration_test.py](tests/integration_test.py) |
 
-- C++ 存储恢复、并发写入与快照、group commit、并发关闭、日志截断和校验和检查。
-- 暂停 WAL 同步时的请求进展、未同步批次容量限制、逐批确认和关闭时排空。
-- 快照写盘期间的可靠读写、自动快照、WAL 后缀复制与替换故障、关闭后再次恢复。
-- 缺失快照时拒绝误建空库、恢复已被快照覆盖的 WAL 后继续写入并再次重启。
-- WAL/快照 I/O 故障注入、真实短写/EFBIG、多个快照边界的进程退出。
-- Go 网关参数校验、连接池总量上限、请求取消、超时分类和写请求不重试；启用 race 检查。
-- C++ 与 Go 的端到端测试：40 条空闲/不完整连接、TCP 分片与流水线、1 MiB value、客户端 RST、过载反馈、停机响应、SIGKILL 后恢复。
-- AddressSanitizer 和 UndefinedBehaviorSanitizer 检查。
+[CI 工作流](.github/workflows/ci.yml) 配置了上述两组命令；第二组使用 AddressSanitizer / UndefinedBehaviorSanitizer 检查 C++。测试使用临时目录和本机临时端口，进程退出测试不等同于真实断电测试。
 
-测试使用独立临时目录和本机临时端口。进程退出测试不等同于真实断电测试；硬件持久性依赖文件系统和设备正确执行同步操作。CI 会执行上述两组命令。
+单项测试、手动 ThreadSanitizer 检查和环境要求见[测试指南](docs/testing.md#运行回归检查)。
 
-检查 C++ 存储并发中的数据竞争：
+## 可复现压测
 
-```sh
-cmake -S cpp_engine -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
-  '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
-  -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
-cmake --build build-tsan --target engine_test snapshot_test -j2
-TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
-```
-
-若 TSan 在测试启动前报告 `unexpected memory mapping`，在支持 `setarch` 的 x86_64 Linux 环境中可仅对测试进程关闭地址随机化后重试，例如：
-
-```sh
-setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 ./build-tsan/snapshot_test
-```
-
-## 压测
-
-启动服务后，在项目根目录运行：
+使用快速开始中的演示数据目录，在引擎和网关运行时执行：
 
 ```sh
 ./bin/minikv-bench \
   -url http://127.0.0.1:8080/kv \
-  -workers 40 -requests 400000 -op mixed \
-  -keyspace 20000 -preload-count 20000 \
+  -workers 20 -requests 20000 -op mixed \
+  -keyspace 1000 -preload-count 1000 \
   -write-ratio 20 -delete-ratio 5 \
   -value-size 128 -seed 1
 ```
 
-报告包含总 QPS、成功吞吐量（含正常未命中）、平均延迟、P50/P95/P99/P99.9、错误数与 HTTP 状态分布。预热失败或存在系统失败时，工具以非零状态退出。`-preload=false` 会关闭预热。
+这会预热并修改 `k0` 至 `k999`。报告包含总 QPS、成功吞吐量（含正常未命中）、P50/P95/P99/P99.9、错误数和状态码分布。延迟统计包含失败请求，预热耗时不计入测量；预热失败或出现系统失败时，工具以非零状态退出。
 
-对比实验应固定硬件、构建类型、持久化模式、批量参数、数据量、value 大小、随机种子和命中率，并保存服务启动配置。压测默认采用固定并发的闭环负载；应另做固定到达速率的过载实验，不能仅凭闭环 P99 判断容量。
+比较时应固定提交、硬件、构建类型、持久化模式和负载，分别报告两种模式的结果，并保留原始输出。当前工具采用固定并发的闭环负载，服务变慢时发送速率也会下降；判断过载容量还需要固定到达速率实验。
 
-后台 WAL 写入和同步已移出状态锁；吞吐模式请求可在同步期间继续执行，可靠模式仍等待对应批次持久化。快照文件写入期间，读写请求和 WAL 提交也可继续执行。复制内存数据仍需持有状态锁并额外占用一份数据集的内存；最后重写 WAL 后缀时会暂停其他 WAL I/O，可靠模式请求可能等待该步骤完成。
+实验记录要求、快照代价与指标口径见[测试与性能实验](docs/testing.md#运行一次可复现的压测)。`benmark/out/` 中的历史结果来自修复前版本，不能用作当前版本的性能结论。
 
-测试快照影响时，可用 `MINIKV_SNAPSHOT_INTERVAL_MS=1000` 缩短周期，并运行覆盖多个周期的负载，记录数据集大小、快照耗时、内存峰值和尾延迟。并发设计不代表已有实测性能收益；锁顺序与容量约束见 [设计说明](docs/design.md#wal-io-与状态锁)。此次优化保持 v1 文件格式、协议和默认配置不变，已有 `snapshot.v1` / `wal.v1` 可直接恢复。
+## 后续路线
 
-`benmark/out/` 中的现有数据与图表属于修复前版本，不代表新版性能。绘图依赖 Matplotlib：
+当前实现面向单机、全量内存数据集，没有内存淘汰或磁盘容量上限；队列限额不限制整个数据集大小。鉴权、TLS、事务和复制尚未实现。
 
-```sh
-python3 benmark/paint.py
-# 服务运行时重新采样：
-python3 benmark/paint.py --rerun
-```
+接下来优先把现有设计变成可观测、可比较的工程结果：
 
-## 配置
-
-| 环境变量 | 默认值 | 用途 |
+| 优先级 | 方向 | 完成标准 |
 | --- | --- | --- |
-| `MINIKV_DATA_DIR` | `./data` | 相对当前工作目录或绝对数据目录 |
-| `MINIKV_WAL_MODE` | `throughput` | `throughput` / `reliable` |
-| `MINIKV_WAL_BATCH_SIZE` | 512 | 批量同步触发条数 |
-| `MINIKV_WAL_FLUSH_MS` | 100 | 同步触发间隔，毫秒 |
-| `MINIKV_WAL_QUEUE_BYTES` | 16777216 | 待提交 WAL 字节上限 |
-| `MINIKV_SNAPSHOT_INTERVAL_MS` | 1200000 | 快照周期，0 禁用自动快照 |
-| `MINIKV_ENGINE_HOST` / `MINIKV_ENGINE_PORT` | `127.0.0.1` / 9090 | 引擎监听地址 |
-| `MINIKV_WORKERS` | 20 | 完整请求执行线程数 |
-| `MINIKV_REQUEST_QUEUE_SIZE` | 128 | 待执行请求数量上限 |
-| `MINIKV_MAX_CONNECTIONS` | 256 | 引擎连接数量上限 |
-| `MINIKV_CLIENT_IDLE_MS` | 30000 | 连接无进展超时，毫秒 |
-| `MINIKV_ENGINE_ADDR` | `127.0.0.1:9090` | 网关连接的引擎地址 |
-| `MINIKV_HTTP_ADDR` | `:8080` | 网关监听地址 |
-| `MINIKV_RPC_POOL_SIZE` | 64 | 网关到引擎的总连接上限 |
-| `MINIKV_RPC_TIMEOUT_MS` | 2000 | 连接池等待与 RPC 的总超时 |
+| P1 | 增加运行指标 | 能区分 RPC 等待、请求排队、WAL 同步和快照耗时，观察队列占用、持久化进度与错误 |
+| P2 | 建立性能基线 | 为两种持久化模式保存可重跑的配置与原始结果，联合报告成功吞吐量、尾延迟、错误率和内存峰值 |
+| P3 | 评估快照与日志回收方案 | 在现有故障测试下比较分段 WAL、减少状态复制等方案，量化暂停时间、内存和写放大再决定实现 |
 
-## 目录
+## 文档与源码导航
 
-- `cpp_engine/engine.*`：存储状态、WAL、快照与恢复。
-- `cpp_engine/codec.h`：协议及持久化记录编码。
-- `cpp_engine/server.cpp`：epoll 连接管理与请求调度。
-- `go_server/`：HTTP API 与有界 RPC 连接池。
-- `benmark/`：压测、绘图与历史结果。
-- `tests/`：存储与端到端回归测试。
-- `docs/`：设计取舍、格式与迁移说明。
+| 想了解什么 | 从这里开始 |
+| --- | --- |
+| 完整配置、HTTP API、停机备份与迁移 | [使用与配置](docs/usage.md) |
+| 提交顺序、锁、文件格式与故障模型 | [存储与协议设计](docs/design.md) |
+| 回归测试、数据竞争检查与性能实验 | [测试与性能实验](docs/testing.md) |
+| 内存状态、WAL、快照与恢复 | [cpp_engine/engine.cpp](cpp_engine/engine.cpp) |
+| TCP 连接管理与二进制编码 | [cpp_engine/server.cpp](cpp_engine/server.cpp)、[codec.h](cpp_engine/codec.h) |
+| HTTP 网关与 RPC 连接池 | [go_server/](go_server/) |
+| 压测工具与绘图 | [benmark/](benmark/) |
