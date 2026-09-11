@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	urlpkg "net/url"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +30,7 @@ type benchConfig struct {
 	preload      bool
 	preloadCount int
 	seed         int64
+	valueSize    int
 }
 
 type benchResult struct {
@@ -58,7 +61,8 @@ func parseFlags() benchConfig {
 	flag.IntVar(&cfg.deleteRatio, "delete-ratio", 5, "mixed 模式下 DELETE 占比(%)")
 	flag.BoolVar(&cfg.preload, "preload", true, "GET/mixed 前是否预热数据")
 	flag.IntVar(&cfg.preloadCount, "preload-count", 20000, "预热 key 数量")
-	flag.Int64Var(&cfg.seed, "seed", time.Now().UnixNano(), "随机种子")
+	flag.Int64Var(&cfg.seed, "seed", 1, "随机种子")
+	flag.IntVar(&cfg.valueSize, "value-size", 128, "value 字节数 (0 到 1048576)")
 	flag.Parse()
 
 	cfg.op = strings.ToLower(cfg.op)
@@ -76,6 +80,9 @@ func parseFlags() benchConfig {
 	}
 	if cfg.writeRatio < 0 {
 		cfg.writeRatio = 0
+	}
+	if cfg.writeRatio > 100 {
+		cfg.writeRatio = 100
 	}
 	if cfg.deleteRatio < 0 {
 		cfg.deleteRatio = 0
@@ -108,7 +115,7 @@ func doRequest(client *http.Client, req *http.Request) (int, string, error) {
 	if err != nil {
 		return 0, "", err
 	}
-	return resp.StatusCode, strings.TrimSpace(string(body)), nil
+	return resp.StatusCode, string(body), nil
 }
 
 func doPut(client *http.Client, url, key, value string) (int, string, error) {
@@ -151,9 +158,9 @@ func chooseMixedOp(r *rand.Rand, writeRatio, deleteRatio int) string {
 	return "get"
 }
 
-func preloadData(cfg benchConfig, client *http.Client) {
-	if !(cfg.op == "get" || cfg.op == "mixed" || cfg.preload) {
-		return
+func preloadData(cfg benchConfig, client *http.Client) error {
+	if !cfg.preload || (cfg.op != "get" && cfg.op != "mixed") {
+		return nil
 	}
 	count := cfg.preloadCount
 	if count > cfg.keyspace {
@@ -162,13 +169,37 @@ func preloadData(cfg benchConfig, client *http.Client) {
 	fmt.Printf("正在预热 %d 个 key...\n", count)
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("k%d", i)
-		value := fmt.Sprintf("v%d", i)
-		_, _, _ = doPut(client, cfg.baseURL, key, value)
+		value := makeValue(fmt.Sprintf("v%d", i), cfg.valueSize)
+		status, body, err := doPut(client, cfg.baseURL, key, value)
+		if err != nil || status != http.StatusOK || body != "OK\n" {
+			return fmt.Errorf("预热 key %s 失败: HTTP %d, body=%q, err=%v", key, status, body, err)
+		}
 	}
 	fmt.Println("预热完成。")
+	return nil
 }
 
-func runBenchmark(cfg benchConfig) benchResult {
+func makeValue(prefix string, size int) string {
+	if len(prefix) >= size {
+		return prefix[:size]
+	}
+	return prefix + strings.Repeat("x", size-len(prefix))
+}
+
+func classifyResult(op string, status int, body string) (success, miss bool) {
+	if (op == "get" || op == "delete") && status == http.StatusNotFound && body == "NOT_FOUND\n" {
+		return false, true
+	}
+	if status != http.StatusOK {
+		return false, false
+	}
+	if op == "get" {
+		return strings.HasPrefix(body, "VALUE ") && strings.HasSuffix(body, "\n"), false
+	}
+	return (op == "put" || op == "delete") && body == "OK\n", false
+}
+
+func runBenchmark(cfg benchConfig) (benchResult, error) {
 	result := benchResult{
 		latencies:   make([]time.Duration, 0, cfg.requests),
 		statusCount: make(map[int]int64),
@@ -176,7 +207,10 @@ func runBenchmark(cfg benchConfig) benchResult {
 	}
 
 	client := newHTTPClient(cfg.timeout, cfg.workers)
-	preloadData(cfg, client)
+	defer client.CloseIdleConnections()
+	if err := preloadData(cfg, client); err != nil {
+		return result, err
+	}
 
 	jobs := make(chan int)
 	latCh := make(chan time.Duration, cfg.requests)
@@ -199,7 +233,7 @@ func runBenchmark(cfg benchConfig) benchResult {
 				}
 
 				key := fmt.Sprintf("k%d", r.Intn(cfg.keyspace))
-				value := fmt.Sprintf("v%d-%d", workerID, i)
+				value := makeValue(fmt.Sprintf("v%d-%d", workerID, i), cfg.valueSize)
 
 				start := time.Now()
 				status := 0
@@ -224,12 +258,13 @@ func runBenchmark(cfg benchConfig) benchResult {
 				}
 
 				statusCh <- status
-				if (op == "get" || op == "delete") && body == "NOT_FOUND" {
+				success, miss := classifyResult(op, status, body)
+				if miss {
 					atomic.AddInt64(&logicalMissCount, 1)
 					continue
 				}
 
-				if status >= 200 && status < 300 {
+				if success {
 					atomic.AddInt64(&successCount, 1)
 				} else {
 					atomic.AddInt64(&failureCount, 1)
@@ -258,14 +293,14 @@ func runBenchmark(cfg benchConfig) benchResult {
 	result.successes = successCount
 	result.failures = failureCount
 	result.logicalMisses = logicalMissCount
-	return result
+	return result, nil
 }
 
 func percentile(sorted []time.Duration, p float64) time.Duration {
 	if len(sorted) == 0 {
 		return 0
 	}
-	idx := int((p / 100.0) * float64(len(sorted)-1))
+	idx := int(math.Ceil((p/100.0)*float64(len(sorted)))) - 1
 	if idx < 0 {
 		idx = 0
 	}
@@ -294,19 +329,18 @@ func printReport(cfg benchConfig, result benchResult) {
 	p50 := percentile(result.latencies, 50)
 	p95 := percentile(result.latencies, 95)
 	p99 := percentile(result.latencies, 99)
+	p999 := percentile(result.latencies, 99.9)
 	avg := avgDuration(result.latencies)
 
 	qps := float64(0)
+	goodQPS := float64(0)
 	if result.elapsed > 0 {
 		qps = float64(result.total) / result.elapsed.Seconds()
+		goodQPS = float64(result.successes+result.logicalMisses) / result.elapsed.Seconds()
 	}
 	successRate := float64(0)
-	effectiveTotal := result.total - int(result.logicalMisses)
-	if effectiveTotal < 1 {
-		effectiveTotal = 1
-	}
-	if effectiveTotal > 0 {
-		successRate = float64(result.successes) * 100.0 / float64(effectiveTotal)
+	if result.total > 0 {
+		successRate = float64(result.successes+result.logicalMisses) * 100.0 / float64(result.total)
 	}
 
 	fmt.Println("\n===== MiniKV 压测报告 =====")
@@ -315,12 +349,17 @@ func printReport(cfg benchConfig, result benchResult) {
 	fmt.Printf("并发 Worker     : %d\n", cfg.workers)
 	fmt.Printf("总请求数        : %d\n", result.total)
 	fmt.Printf("Key 空间        : %d\n", cfg.keyspace)
+	fmt.Printf("Value 字节数    : %d\n", cfg.valueSize)
+	fmt.Printf("随机种子        : %d\n", cfg.seed)
+	fmt.Printf("写入/删除占比   : %d%% / %d%%\n", cfg.writeRatio, cfg.deleteRatio)
 	fmt.Printf("总耗时          : %v\n", result.elapsed)
 	fmt.Printf("QPS             : %.2f\n", qps)
+	fmt.Printf("成功吞吐量      : %.2f req/s（含正常未命中）\n", goodQPS)
 	fmt.Printf("平均延迟        : %v\n", avg)
 	fmt.Printf("P50 延迟        : %v\n", p50)
 	fmt.Printf("P95 延迟        : %v\n", p95)
 	fmt.Printf("P99 延迟        : %v\n", p99)
+	fmt.Printf("P99.9 延迟      : %v\n", p999)
 	fmt.Printf("成功请求        : %d\n", result.successes)
 	fmt.Printf("逻辑未命中      : %d\n", result.logicalMisses)
 	fmt.Printf("失败请求        : %d\n", result.failures)
@@ -341,6 +380,18 @@ func printReport(cfg benchConfig, result benchResult) {
 
 func main() {
 	cfg := parseFlags()
-	result := runBenchmark(cfg)
+	if cfg.valueSize < 0 || cfg.valueSize > 1024*1024 ||
+		(cfg.op != "get" && cfg.op != "put" && cfg.op != "delete" && cfg.op != "mixed") {
+		fmt.Fprintln(os.Stderr, "操作类型或 value-size 参数无效")
+		os.Exit(2)
+	}
+	result, err := runBenchmark(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	printReport(cfg, result)
+	if result.failures > 0 {
+		os.Exit(1)
+	}
 }

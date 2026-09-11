@@ -23,6 +23,7 @@
 
 # Fortran module files
 *.mod
+!go.mod
 *.smod
 
 # Compiled Static libraries
@@ -41,6 +42,10 @@
 
 # build
 build/
+build-*/
+bin/
+go_server/minikv-go
+benmark/minikv-bench
 
 # C++
 *.o
@@ -49,6 +54,10 @@ build/
 # data
 data/*.db
 data/*.log
+data/LOCK
+data/*.v1
+data/*.tmp
+__pycache__/
 
 # editor
 .vscode/

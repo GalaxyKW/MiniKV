@@ -1,501 +1,366 @@
-#include <iostream>
-#include <cstring>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <unordered_map>
-#include <sstream>
-#include <fstream>
-#include <thread>
-#include <mutex>
-#include <cerrno>
-#include <shared_mutex>
-#include <deque>
-#include <condition_variable>
-#include <chrono>
-#include <atomic>
-#include <cstdlib>
-#include <iomanip>
+#include "engine.h"
+#include "codec.h"
 #include "threadpool.h"
 
-#include <list>
-#include <utility>
+#include <arpa/inet.h>
+#include <array>
+#include <atomic>
+#include <cerrno>
+#include <csignal>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <mutex>
+#include <stdexcept>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <unordered_map>
+#include <vector>
 
-using namespace std;
+namespace {
+using namespace minikv;
+using Clock = std::chrono::steady_clock;
+std::atomic<bool> stopping{false};
+static_assert(std::atomic<bool>::is_always_lock_free, "signal handler requires lock-free atomics");
 
-unordered_map<string,string> kv;
-ofstream wal("/item/MiniKV/data/wal.log", ios::app);
+void stop_server(int) { stopping.store(true, std::memory_order_relaxed); }
 
-mutex wal_mutex;
-shared_mutex kv_mutex;
-mutex log_mutex;
-condition_variable wal_cv;
-condition_variable wal_flushed_cv;
+int env_int(const char* name, int fallback, int minimum, int maximum) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr) return fallback;
+    char* end = nullptr;
+    errno = 0;
+    const long result = std::strtol(raw, &end, 10);
+    if (errno || end == raw || *end != '\0' || result < minimum || result > maximum) {
+        throw std::invalid_argument(std::string("invalid ") + name);
+    }
+    return static_cast<int>(result);
+}
 
-enum class WalMode {
-    Throughput,
-    Reliable,
+std::string env_string(const char* name, const char* fallback) {
+    const char* raw = std::getenv(name);
+    return raw ? raw : fallback;
+}
+
+[[noreturn]] void network_error(const char* operation) {
+    throw std::runtime_error(std::string(operation) + ": " + std::strerror(errno));
+}
+
+struct Client {
+    int fd;
+    std::string input;
+    std::string output;
+    size_t sent = 0;
+    bool registered = false;
+    bool busy = false;
+    bool close_after_write = false;
+    Clock::time_point active = Clock::now();
 };
 
-struct WalRecord {
-    uint64_t seq;
-    string line;
+struct Completion {
+    uint64_t id;
+    Response response;
 };
 
-deque<WalRecord> wal_queue;
-uint64_t wal_next_seq = 0;
-uint64_t wal_flushed_seq = 0;
-
-int wal_batch_size = 64;
-chrono::milliseconds wal_flush_interval_ms(20);
-WalMode wal_mode = WalMode::Throughput;
-
-atomic<uint64_t> wal_flush_rounds{0};
-atomic<uint64_t> accept_ok_total{0};
-atomic<uint64_t> accept_fail_total{0};
-atomic<uint64_t> accept_eintr_total{0};
-atomic<uint64_t> client_send_fail_total{0};
-
-ThreadPool pool(20);
-
-void log_line(const string& message, bool is_error = false) {
-    // lock_guard<mutex> lock(log_mutex);
-    // if (is_error) {
-    //     cerr << message << endl;
-    // } else {
-    //     cout << message << endl;
-    // }
-}
-
-int get_env_int(const char* name, int default_value, int min_value) {
-    const char* raw = getenv(name);
-    if (raw == nullptr) {
-        return default_value;
-    }
-    try {
-        int value = stoi(raw);
-        if (value < min_value) {
-            return default_value;
+// The reactor owns every socket and buffer. Workers receive complete requests
+// only; idle connections and partial frames never occupy a worker.
+class Server {
+public:
+    explicit Server(Engine& engine)
+        : engine_(engine),
+          pool_(env_int("MINIKV_WORKERS", 20, 1, 1024),
+                env_int("MINIKV_REQUEST_QUEUE_SIZE", 128, 1, 65536)),
+          max_connections_(env_int("MINIKV_MAX_CONNECTIONS", 256, 1, 65536)),
+          idle_timeout_(env_int("MINIKV_CLIENT_IDLE_MS", 30000, 1, 3600000)) {
+        try {
+            epoll_fd_ = ::epoll_create1(EPOLL_CLOEXEC);
+            if (epoll_fd_ < 0) network_error("epoll_create1");
+            completed_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+            if (completed_fd_ < 0) network_error("eventfd");
+            listen_fd_ = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+            if (listen_fd_ < 0) network_error("socket");
+            int reuse = 1;
+            if (::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) network_error("SO_REUSEADDR");
+            sockaddr_in address{};
+            address.sin_family = AF_INET;
+            const int port = env_int("MINIKV_ENGINE_PORT", 9090, 1, 65535);
+            address.sin_port = htons(static_cast<uint16_t>(port));
+            const auto host = env_string("MINIKV_ENGINE_HOST", "127.0.0.1");
+            if (::inet_pton(AF_INET, host.c_str(), &address.sin_addr) != 1) throw std::invalid_argument("MINIKV_ENGINE_HOST must be an IPv4 address");
+            if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) network_error("bind");
+            if (::listen(listen_fd_, 256) != 0) network_error("listen");
+            add_fd(listen_fd_, 1, EPOLLIN);
+            add_fd(completed_fd_, 2, EPOLLIN);
+            std::cout << "MiniKV engine listening on " << host << ':' << port << std::endl;
+        } catch (...) {
+            release();
+            throw;
         }
-        return value;
-    } catch (...) {
-        return default_value;
-    }
-}
-
-void init_wal_config() {
-    wal_batch_size = get_env_int("MINIKV_WAL_BATCH_SIZE", 512, 1);
-    wal_flush_interval_ms = chrono::milliseconds(get_env_int("MINIKV_WAL_FLUSH_MS", 100, 1));
-
-    string mode = "throughput";
-    if (const char* raw = getenv("MINIKV_WAL_MODE")) {
-        mode = raw;
-    }
-    if (mode == "reliable") {
-        wal_mode = WalMode::Reliable;
-    } else {
-        wal_mode = WalMode::Throughput;
     }
 
-    string mode_name = (wal_mode == WalMode::Reliable) ? "reliable" : "throughput";
-    log_line("WAL config: mode=" + mode_name + ", batch=" + to_string(wal_batch_size) + ", flush_ms=" + to_string(wal_flush_interval_ms.count()));
-}
-
-void flush_wal_queue_locked() {
-    if (wal_queue.empty()) {
-        return;
+    ~Server() {
+        // Finish accepted tasks before closing the completion eventfd or engine.
+        pool_.shutdown();
+        release();
     }
-    uint64_t last_seq = wal_queue.back().seq;
-    while (!wal_queue.empty()) {
-        wal << wal_queue.front().line << '\n';
-        wal_queue.pop_front();
-    }
-    wal.flush();
-    wal_flushed_seq = last_seq;
-    wal_flush_rounds.fetch_add(1, memory_order_relaxed);
-    wal_flushed_cv.notify_all();
-}
 
-void wal_flush_worker() {
-    unique_lock<mutex> lock(wal_mutex);
-    while (true) {
-        if (wal_queue.empty()) {
-            wal_cv.wait(lock, [] {
-                return !wal_queue.empty();
-            });
+    void run() {
+        std::array<epoll_event, 128> events{};
+        while (true) {
+            if (stopping.load(std::memory_order_relaxed) && !draining_) begin_shutdown();
+            if (draining_ && (clients_.empty() || Clock::now() >= shutdown_deadline_)) break;
+            const int count = ::epoll_wait(epoll_fd_, events.data(), static_cast<int>(events.size()), 100);
+            if (count < 0) {
+                if (errno == EINTR) continue;
+                network_error("epoll_wait");
+            }
+            for (int i = 0; i < count; ++i) {
+                const uint64_t id = events[i].data.u64;
+                if (id == 1) {
+                    if (!draining_) accept_clients();
+                    continue;
+                }
+                if (id == 2) { finish_requests(); continue; }
+                if (clients_.find(id) == clients_.end()) continue;
+                const auto flags = events[i].events;
+                if (flags & (EPOLLERR | EPOLLHUP)) { close_client(id); continue; }
+                if (!draining_ && (flags & (EPOLLIN | EPOLLRDHUP))) read_client(id);
+                if (clients_.find(id) != clients_.end() && !clients_.at(id).output.empty()) write_client(id);
+            }
+            const auto now = Clock::now();
+            std::vector<uint64_t> expired;
+            for (const auto& entry : clients_) {
+                if (!draining_ && now - entry.second.active >= idle_timeout_) expired.push_back(entry.first);
+            }
+            for (auto id : expired) close_client(id);
         }
-
-        wal_cv.wait_for(lock, wal_flush_interval_ms, [] {
-            return static_cast<int>(wal_queue.size()) >= wal_batch_size;
-        });
-
-        flush_wal_queue_locked();
-    }
-}
-
-void append_wal_record(const string& line) {
-    uint64_t seq = 0;
-    {
-        lock_guard<mutex> lock(wal_mutex);
-        seq = ++wal_next_seq;
-        wal_queue.push_back({seq, line});
+        // Slow peers have a bounded response grace period. Admitted storage
+        // work must still finish before main() flushes and closes the engine.
+        while (!clients_.empty()) close_client(clients_.begin()->first);
+        pool_.shutdown();
     }
 
-    wal_cv.notify_one();
-
-    if (wal_mode == WalMode::Reliable) {
-        unique_lock<mutex> lock(wal_mutex);
-        wal_flushed_cv.wait(lock, [seq] {
-            return wal_flushed_seq >= seq;
-        });
-    }
-}
-
-void monitor_metrics_thread() {
-    uint64_t prev_ok = 0;
-    uint64_t prev_fail = 0;
-    uint64_t prev_flush_rounds = 0;
-    uint64_t prev_send_fail = 0;
-
-    while (true) {
-        this_thread::sleep_for(chrono::seconds(10));
-
-        uint64_t now_ok = accept_ok_total.load(memory_order_relaxed);
-        uint64_t now_fail = accept_fail_total.load(memory_order_relaxed);
-        uint64_t now_flush_rounds = wal_flush_rounds.load(memory_order_relaxed);
-        uint64_t now_send_fail = client_send_fail_total.load(memory_order_relaxed);
-
-        uint64_t delta_ok = now_ok - prev_ok;
-        uint64_t delta_fail = now_fail - prev_fail;
-        uint64_t delta_flush_rounds = now_flush_rounds - prev_flush_rounds;
-        uint64_t delta_send_fail = now_send_fail - prev_send_fail;
-
-        prev_ok = now_ok;
-        prev_fail = now_fail;
-        prev_flush_rounds = now_flush_rounds;
-        prev_send_fail = now_send_fail;
-
-        double fail_rate = 0.0;
-        if ((delta_ok + delta_fail) > 0) {
-            fail_rate = 100.0 * static_cast<double>(delta_fail) / static_cast<double>(delta_ok + delta_fail);
+private:
+    void begin_shutdown() {
+        draining_ = true;
+        shutdown_deadline_ = Clock::now() + std::chrono::seconds(5);
+        ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, listen_fd_, nullptr);
+        ::close(listen_fd_);
+        listen_fd_ = -1;
+        std::vector<uint64_t> idle;
+        for (const auto& entry : clients_) {
+            if (!entry.second.busy && entry.second.output.empty()) idle.push_back(entry.first);
         }
-
-        ostringstream oss;
-        oss << "Monitor(10s): accept_ok=" << delta_ok
-            << ", accept_fail=" << delta_fail
-            << ", accept_fail_rate=" << fixed << setprecision(2) << fail_rate << "%"
-            << ", wal_flush_rounds=" << delta_flush_rounds
-            << ", send_fail=" << delta_send_fail;
-        log_line(oss.str());
+        for (auto id : idle) close_client(id);
     }
-}
 
-/*
-class LRUCache {
-    public:
-        explicit LRUCache(size_t cap): capacity(cap) {}
-        bool get(const string &key, string &value){
-            auto it = index.find(key);
-            if(it == index.end()) return false;
-            items.splice(items.begin(), items, it->second);
-            value = it->second->second;
-            return true;
+    void add_fd(int fd, uint64_t id, uint32_t flags) {
+        epoll_event event{};
+        event.events = flags;
+        event.data.u64 = id;
+        if (::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &event) != 0) network_error("epoll add");
+    }
+
+    void arm(uint64_t id, uint32_t flags) {
+        auto& client = clients_.at(id);
+        epoll_event event{};
+        event.events = flags | EPOLLRDHUP;
+        event.data.u64 = id;
+        if (::epoll_ctl(epoll_fd_, client.registered ? EPOLL_CTL_MOD : EPOLL_CTL_ADD, client.fd, &event) != 0) {
+            close_client(id);
+            return;
         }
-        void put(const string &key, const string &value){
-            auto it = index.find(key);
-            if(it != index.end()){
-                it->second->second = value;
-                items.splice(items.begin(), items, it->second);
+        client.registered = true;
+    }
+
+    void close_client(uint64_t id) {
+        auto it = clients_.find(id);
+        if (it == clients_.end()) return;
+        if (it->second.registered) ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, it->second.fd, nullptr);
+        ::close(it->second.fd);
+        clients_.erase(it);
+    }
+
+    void accept_clients() {
+        // Bound each accept pass so established clients continue making progress.
+        for (int i = 0; i < 128 && !stopping.load(std::memory_order_relaxed); ++i) {
+            const int fd = ::accept4(listen_fd_, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+            if (fd < 0) {
+                if (errno == EINTR) continue;
+                if (errno != EAGAIN && errno != EWOULDBLOCK) std::cerr << "accept: " << std::strerror(errno) << '\n';
                 return;
             }
-            items.emplace_front(key, value);
-            index[key] = items.begin();
-            if(items.size() > capacity){
-                auto last = prev(items.end());
-                index.erase(last->first);
-                items.pop_back();
+            if (clients_.size() >= max_connections_) { ::close(fd); continue; }
+            const uint64_t id = next_id_++;
+            clients_.emplace(id, Client{fd, {}, {}});
+            arm(id, EPOLLIN);
+        }
+    }
+
+    void respond(uint64_t id, Response response, bool close_after = false) {
+        auto& client = clients_.at(id);
+        client.output = codec::response(response);
+        client.sent = 0;
+        client.busy = false;
+        client.close_after_write = close_after;
+        arm(id, EPOLLOUT);
+    }
+
+    bool dispatch(uint64_t id) {
+        if (draining_ || stopping.load(std::memory_order_relaxed)) return false;
+        auto& client = clients_.at(id);
+        if (client.input.size() < codec::kRequestHeader) return false;
+        Request request;
+        size_t size;
+        try {
+            size = codec::request_size(client.input);
+            if (client.input.size() < size) return false;
+            request = codec::decode_request(std::string_view(client.input).substr(0, size));
+        } catch (const std::exception& error) {
+            respond(id, {Status::Invalid, error.what()}, true);
+            return true;
+        }
+        client.input.erase(0, size);
+        const bool admitted = pool_.enqueue([this, id, request = std::move(request)] {
+            Response response;
+            try { response = engine_.execute(request); }
+            catch (const std::exception& error) { response = {Status::IOError, error.what()}; }
+            {
+                std::lock_guard<std::mutex> lock(completion_mutex_);
+                completions_.push_back({id, std::move(response)});
             }
-        }
-        void erase(const string &key){
-            auto it = index.find(key);
-            if(it != index.end()){
-                items.erase(it->second);
-                index.erase(it);
-            }
-        }
-    private:
-        size_t capacity;
-        list<pair<string, string>> items;
-        unordered_map<string, list<pair<string, string>>::iterator> index;
-};
-
-LRUCache cache(10000);
-    */
-
-void snapshot(){
-    scoped_lock lock(wal_mutex, kv_mutex);
-
-    flush_wal_queue_locked();
-
-    wal.close(); 
-
-    ofstream file("/item/MiniKV/data/data.db.tmp");
-
-    for(auto &pair : kv){
-        file << pair.first << ":" << pair.second << endl;
-    }
-    file.flush();
-    file.close();
-    if(rename("/item/MiniKV/data/data.db.tmp", "/item/MiniKV/data/data.db") != 0){
-        log_line("Error renaming snapshot file: " + string(strerror(errno)), true);
-    }
-
-    ofstream clear("/item/MiniKV/data/wal.log", ios::trunc);
-    clear.close();
-
-    wal.clear();
-    wal.open("/item/MiniKV/data/wal.log", ios::app);
-    if (!wal.is_open()) {
-        log_line("Failed to reopen WAL after snapshot", true);
-    }
-
-    log_line("Snapshot complete. KV size = " + to_string(kv.size()));
-};
-
-void load_snapshot(){
-    ifstream file("/item/MiniKV/data/data.db");
-    string line;
-    while(getline(file, line)){
-        auto pos = line.find(':');
-        if(pos != string::npos){
-            string key = line.substr(0, pos);
-            string value = line.substr(pos + 1);
-            kv[key] = value;
-        }
-    }
-};
-
-void snapshot_thread(){
-    while(true){
-        sleep(20*60);
-        snapshot();
-    }
-}
-
-void load_wal(){
-    ifstream file("/item/MiniKV/data/wal.log");
-    string line;
-    while(getline(file, line)){
-        stringstream ss(line);
-        string op, key;
-        if(!(ss >> op >> key)) {
-            continue;
-        }
-        if(op == "PUT"){
-            string value;
-            getline(ss, value);
-            if(!value.empty() && value[0] == ' ') value.erase(0, 1);
-            kv[key] = value;
-        }
-        else if(op == "DEL"){
-            kv.erase(key);
-        }   
-    }
-}
-
-struct Command{
-    string op, key, value;
-};
-bool parse_command(const string &cmd, Command &out){
-    istringstream ss(cmd);
-    if(!(ss >> out.op)) return false;
-    if(out.op == "GET"||out.op == "DEL"){
-        if(!(ss >> out.key))return false;
-        return true;
-    }
-    else if(out.op == "PUT"){
-        if(!(ss >> out.key))return false;
-        string rest;
-        getline(ss, rest);
-        if(!rest.empty() && rest[0] == ' ') rest.erase(0, 1);
-        out.value = rest;
-        return true;
-    }
-    return false;
-}
-
-bool read_line(int client, string &out, string &pending, size_t max_len = 4096){
-    out.clear();
-
-    while (true) {
-        size_t newline_pos = pending.find('\n');
-        if (newline_pos != string::npos) {
-            out = pending.substr(0, newline_pos);
-            pending.erase(0, newline_pos + 1);
-            if (!out.empty() && out.back() == '\r') {
-                out.pop_back();
-            }
-            return out.size() <= max_len;
-        }
-
-        if (pending.size() > max_len) {
-            return false;
-        }
-
-        char buffer[1024];
-        ssize_t n = recv(client, buffer, sizeof(buffer), 0);
-        if (n == 0) {
-            return false;
-        }
-        if (n < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return false;
-        }
-
-        pending.append(buffer, static_cast<size_t>(n));
-    }
-}
-
-void handle_client(int client){
-
-    string pending;
-    while (true) {
-        string cmd;
-        if(!read_line(client, cmd, pending)){
-            break;
-        }
-
-        log_line("Received: " + cmd);
-
-        Command cmd_struct;
-        if(!parse_command(cmd, cmd_struct)){
-            string resp = "ERROR Invalid command\n";
-            if(send(client, resp.c_str(), resp.size(), 0) < 0){
-                client_send_fail_total.fetch_add(1, memory_order_relaxed);
-                log_line("send failed: " + string(strerror(errno)), true);
-                break;
-            }
-            continue;
-        }
-
-        string op = cmd_struct.op;
-        string key = cmd_struct.key;
-        string value = cmd_struct.value;
-        string response;
-
-        if(op == "PUT"){
-            string wal_record = "PUT " + key + " " + value;
-            append_wal_record(wal_record);
-
-            lock_guard<shared_mutex> lock(kv_mutex);
-            kv[key] = value;
-            // cache.put(key, value);
-
-            response = "OK\n";
-        }
-
-        else if(op == "GET"){
-
-            shared_lock<shared_mutex> lock(kv_mutex);
-
-            auto it = kv.find(key);
-            if(it != kv.end()){
-                response = "VALUE " + it->second + "\n";
-            }else{
-                response = "NOT_FOUND\n";
-            }
-
-        }
-
-        else if(op == "DEL"){
-            string wal_record = "DEL " + key;
-            append_wal_record(wal_record);
-
-            lock_guard<shared_mutex> lock(kv_mutex);
-
-            if(kv.erase(key)){
-                response = "OK\n";
-                // cache.erase(key);
-            }else{
-                response = "NOT_FOUND\n";
-            }
-        }
-
-        else {
-            response = "ERROR Unsupported command\n";
-        }
-
-        if(send(client, response.c_str(), response.size(), 0) < 0){
-            client_send_fail_total.fetch_add(1, memory_order_relaxed);
-            log_line("send failed: " + string(strerror(errno)), true);
-            break;
-        }
-    }
-
-    close(client);
-}
-
-int main() {
-    init_wal_config();
-
-    load_snapshot();
-    load_wal();
-
-    thread(wal_flush_worker).detach();
-    thread(monitor_metrics_thread).detach();
-    thread(snapshot_thread).detach();
-
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
-        log_line("socket creation failed: " + string(strerror(errno)), true);
-        return 1;
-    }
-
-    int reuse = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        log_line("setsockopt(SO_REUSEADDR) failed: " + string(strerror(errno)), true);
-    }
-
-    sockaddr_in address;
-    address.sin_family = AF_INET;
-
-    int port = 9090;
-    address.sin_port = htons(port);
-    address.sin_addr.s_addr = INADDR_ANY;
-
-    if (bind(server_fd, (sockaddr*)&address, sizeof(address)) < 0) {
-        log_line("bind failed: " + string(strerror(errno)), true);
-        close(server_fd);
-        return 1;
-    }
-
-    if (listen(server_fd, 256) < 0) {
-        log_line("listen failed: " + string(strerror(errno)), true);
-        close(server_fd);
-        return 1;
-    }
-
-    log_line("C++ KV Engine running on port " + to_string(port) + "...");
-
-    while (true) {
-        int client = accept(server_fd, nullptr, nullptr);
-        if (client < 0) {
-            if (errno == EINTR) {
-                accept_eintr_total.fetch_add(1, memory_order_relaxed);
-                continue;
-            }
-            uint64_t fail_count = accept_fail_total.fetch_add(1, memory_order_relaxed) + 1;
-            if (fail_count <= 5 || fail_count % 100 == 0) {
-                log_line("accept failed: errno=" + to_string(errno) + " (" + string(strerror(errno)) + "), total_fail=" + to_string(fail_count), true);
-            }
-            continue;
-        }
-        accept_ok_total.fetch_add(1, memory_order_relaxed);
-        pool.enqueue([client]{
-            handle_client(client);
+            const uint64_t one = 1;
+            while (::write(completed_fd_, &one, sizeof(one)) < 0 && errno == EINTR) {}
         });
+        if (!admitted) {
+            respond(id, {Status::Busy, "request queue is full"});
+            return true;
+        }
+        client.busy = true;
+        // Only one request per connection executes at a time, preserving order.
+        ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client.fd, nullptr);
+        client.registered = false;
+        return true;
     }
 
+    void read_client(uint64_t id) {
+        auto& client = clients_.at(id);
+        if (client.busy || !client.output.empty()) return;
+        if (dispatch(id)) return;
+        std::array<char, 8192> buffer{};
+        constexpr size_t limit = codec::kRequestHeader + kMaxKeySize + kMaxValueSize;
+        while (true) {
+            if (stopping.load(std::memory_order_relaxed)) { close_client(id); return; }
+            const size_t space = std::min(buffer.size(), limit - client.input.size());
+            const ssize_t count = ::recv(client.fd, buffer.data(), space, 0);
+            if (count < 0) {
+                if (errno == EINTR) continue;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+                close_client(id);
+                return;
+            }
+            if (count == 0) { close_client(id); return; }
+            client.input.append(buffer.data(), static_cast<size_t>(count));
+            client.active = Clock::now();
+            if (dispatch(id)) return;
+        }
+    }
+
+    void write_client(uint64_t id) {
+        auto& client = clients_.at(id);
+        while (client.sent < client.output.size()) {
+            const ssize_t count = ::send(client.fd, client.output.data() + client.sent,
+                                         client.output.size() - client.sent, MSG_NOSIGNAL);
+            if (count < 0) {
+                if (errno == EINTR) continue;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+                close_client(id);
+                return;
+            }
+            if (count == 0) { close_client(id); return; }
+            client.sent += static_cast<size_t>(count);
+            client.active = Clock::now();
+        }
+        client.output.clear();
+        if (draining_ || stopping.load(std::memory_order_relaxed) || client.close_after_write) {
+            close_client(id);
+            return;
+        }
+        if (!dispatch(id)) arm(id, EPOLLIN);
+    }
+
+    void finish_requests() {
+        uint64_t count;
+        while (::read(completed_fd_, &count, sizeof(count)) == sizeof(count)) {}
+        std::vector<Completion> ready;
+        {
+            std::lock_guard<std::mutex> lock(completion_mutex_);
+            ready.swap(completions_);
+        }
+        for (auto& completion : ready) {
+            // IDs, unlike descriptors, cannot be reused by a later connection.
+            if (clients_.find(completion.id) == clients_.end()) continue;
+            respond(completion.id, std::move(completion.response));
+            if (clients_.find(completion.id) != clients_.end()) write_client(completion.id);
+        }
+    }
+
+    void release() noexcept {
+        for (const auto& entry : clients_) ::close(entry.second.fd);
+        clients_.clear();
+        if (listen_fd_ >= 0) { ::close(listen_fd_); listen_fd_ = -1; }
+        if (completed_fd_ >= 0) { ::close(completed_fd_); completed_fd_ = -1; }
+        if (epoll_fd_ >= 0) { ::close(epoll_fd_); epoll_fd_ = -1; }
+    }
+
+    Engine& engine_;
+    ThreadPool pool_;
+    size_t max_connections_;
+    std::chrono::milliseconds idle_timeout_;
+    bool draining_ = false;
+    Clock::time_point shutdown_deadline_;
+    int listen_fd_ = -1, completed_fd_ = -1, epoll_fd_ = -1;
+    uint64_t next_id_ = 3;
+    std::unordered_map<uint64_t, Client> clients_;
+    std::mutex completion_mutex_;
+    std::vector<Completion> completions_;
+};
+} // namespace
+
+int main(int argc, char** argv) {
+    try {
+        EngineConfig config;
+        if (argc == 2 && std::string(argv[1]) == "--import-legacy") config.import_legacy = true;
+        else if (argc != 1) {
+            std::cerr << "usage: engine [--import-legacy]\n";
+            return 2;
+        }
+        config.data_dir = env_string("MINIKV_DATA_DIR", "./data");
+        const auto mode = env_string("MINIKV_WAL_MODE", "throughput");
+        if (mode != "throughput" && mode != "reliable") throw std::invalid_argument("MINIKV_WAL_MODE must be throughput or reliable");
+        config.wal_mode = mode == "reliable" ? WalMode::Reliable : WalMode::Throughput;
+        config.wal_batch_size = env_int("MINIKV_WAL_BATCH_SIZE", 512, 1, 65536);
+        config.wal_queue_bytes = env_int("MINIKV_WAL_QUEUE_BYTES", 16 * 1024 * 1024, 2 * 1024 * 1024, 1024 * 1024 * 1024);
+        config.wal_flush_interval = std::chrono::milliseconds(env_int("MINIKV_WAL_FLUSH_MS", 100, 1, 60000));
+        config.snapshot_interval = std::chrono::milliseconds(env_int("MINIKV_SNAPSHOT_INTERVAL_MS", 1200000, 0, 86400000));
+        Engine engine(config);
+        if (config.import_legacy) {
+            engine.close();
+            std::cout << "Legacy import complete; original data.db and wal.log retained.\n";
+            return 0;
+        }
+        std::signal(SIGTERM, stop_server);
+        std::signal(SIGINT, stop_server);
+        {
+            Server server(engine);
+            server.run();
+        }
+        engine.close();
+    } catch (const std::exception& error) {
+        std::cerr << "MiniKV: " << error.what() << '\n';
+        return 1;
+    }
     return 0;
 }

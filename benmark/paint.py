@@ -11,7 +11,7 @@ from matplotlib import font_manager
 import matplotlib.tri as mtri
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "benmark" / "minikv-bench"
+BIN = ROOT / "bin" / "minikv-bench"
 OUT_DIR = ROOT / "benmark" / "out"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -83,7 +83,9 @@ def run_once(put_ratio: int, del_ratio: int):
         "-write-ratio", str(put_ratio),
         "-delete-ratio", str(del_ratio),
         "-preload=true",
-        "-preload-count=2000",
+        "-preload-count", str(KEYSPACE),
+        "-seed=1",
+        "-value-size=128",
     ]
     out = subprocess.check_output(cmd, text=True, cwd=str(ROOT))
     m = QPS_RE.search(out)

@@ -1,7 +1,29 @@
-cmake_minimum_required(VERSION 3.10)
-
-project(minikv_engine)
-
+cmake_minimum_required(VERSION 3.16)
+project(minikv_engine LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+find_package(Threads REQUIRED)
+
+option(MINIKV_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(MINIKV_SANITIZERS)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
+add_library(minikv_storage engine.cpp)
+target_include_directories(minikv_storage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(minikv_storage PUBLIC Threads::Threads)
+target_compile_options(minikv_storage PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(engine server.cpp)
+target_link_libraries(engine PRIVATE minikv_storage)
+target_compile_options(engine PRIVATE -Wall -Wextra -Wpedantic)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(engine_test ../tests/engine_test.cpp)
+    target_link_libraries(engine_test PRIVATE minikv_storage)
+    add_test(NAME storage_recovery COMMAND engine_test)
+    set_tests_properties(storage_recovery PROPERTIES TIMEOUT 60)
+endif()
