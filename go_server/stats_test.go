@@ -88,15 +88,16 @@ func TestStatsHTTPReturnsOnlyDefinedAggregates(t *testing.T) {
 	}
 }
 
-var waitStatsFields = map[string][]string{
+var optionalStatsFields = map[string][]string{
 	"engine": {
 		"wal_capacity_waiters", "wal_capacity_waits_total", "wal_capacity_wait_duration_ns_total",
 		"wal_durable_waiters", "wal_durable_waits_total", "wal_durable_wait_duration_ns_total",
+		"async_requests_inflight", "async_requests_capacity", "async_callback_failures_total",
 	},
-	"server": {"requests_started_total", "request_queue_wait_duration_ns_total"},
+	"server": {"requests_started_total", "request_queue_wait_duration_ns_total", "requests_inflight", "requests_capacity"},
 }
 
-func statsPayloadWithWaitFields(t *testing.T, fields map[string]map[string]json.RawMessage) string {
+func statsPayloadWithOptionalFields(t *testing.T, fields map[string]map[string]json.RawMessage) string {
 	t.Helper()
 	var backend map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(validStatsPayload), &backend); err != nil {
@@ -109,6 +110,7 @@ func statsPayloadWithWaitFields(t *testing.T, fields map[string]map[string]json.
 			t.Fatal(err)
 		}
 		values["wait_request_details"] = json.RawMessage(`{"key":"SENSITIVE_REQUEST_KEY"}`)
+		values["async_request_details"] = json.RawMessage(`{"key":"SENSITIVE_ASYNC_KEY"}`)
 		for field, value := range fields[section] {
 			values[field] = value
 		}
@@ -125,7 +127,7 @@ func statsPayloadWithWaitFields(t *testing.T, fields map[string]map[string]json.
 	return string(payload)
 }
 
-func TestStatsHTTPWaitFieldsPreserveMissingZeroAndUint64Values(t *testing.T) {
+func TestStatsHTTPOptionalFieldsPreserveMissingZeroAndUint64Values(t *testing.T) {
 	tests := []struct {
 		name   string
 		fields map[string]map[string]json.RawMessage
@@ -137,9 +139,26 @@ func TestStatsHTTPWaitFieldsPreserveMissingZeroAndUint64Values(t *testing.T) {
 		{name: "partial_server_fields", fields: map[string]map[string]json.RawMessage{
 			"server": {"requests_started_total": json.RawMessage(`0`)},
 		}},
+		{name: "partial_async_fields", fields: map[string]map[string]json.RawMessage{
+			"engine": {"async_requests_inflight": json.RawMessage(`1`)},
+			"server": {"requests_capacity": json.RawMessage(`512`)},
+		}},
+		{name: "all_async_zeros_are_present", fields: map[string]map[string]json.RawMessage{
+			"engine": {
+				"async_requests_inflight": json.RawMessage(`0`), "async_requests_capacity": json.RawMessage(`0`),
+				"async_callback_failures_total": json.RawMessage(`0`),
+			},
+			"server": {"requests_inflight": json.RawMessage(`0`), "requests_capacity": json.RawMessage(`0`)},
+		}},
 		{name: "null_is_unavailable", fields: map[string]map[string]json.RawMessage{
-			"engine": {"wal_durable_waiters": json.RawMessage(`null`)},
-			"server": {"requests_started_total": json.RawMessage(`null`)},
+			"engine": {
+				"wal_durable_waiters": json.RawMessage(`null`), "async_requests_inflight": json.RawMessage(`null`),
+				"async_requests_capacity": json.RawMessage(`null`), "async_callback_failures_total": json.RawMessage(`null`),
+			},
+			"server": {
+				"requests_started_total": json.RawMessage(`null`), "requests_inflight": json.RawMessage(`null`),
+				"requests_capacity": json.RawMessage(`null`),
+			},
 		}},
 		{name: "complete_current_engine", fields: map[string]map[string]json.RawMessage{
 			"engine": {
@@ -149,10 +168,15 @@ func TestStatsHTTPWaitFieldsPreserveMissingZeroAndUint64Values(t *testing.T) {
 				"wal_durable_waiters":                 json.RawMessage(`2`),
 				"wal_durable_waits_total":             json.RawMessage(`9007199254740993`),
 				"wal_durable_wait_duration_ns_total":  json.RawMessage(`123456789`),
+				"async_requests_inflight":             json.RawMessage(`9007199254740993`),
+				"async_requests_capacity":             json.RawMessage(`18446744073709551615`),
+				"async_callback_failures_total":       json.RawMessage(`19`),
 			},
 			"server": {
 				"requests_started_total":               json.RawMessage(`18446744073709551615`),
 				"request_queue_wait_duration_ns_total": json.RawMessage(`0`),
+				"requests_inflight":                    json.RawMessage(`0`),
+				"requests_capacity":                    json.RawMessage(`18446744073709551615`),
 			},
 		}},
 	}
@@ -160,7 +184,7 @@ func TestStatsHTTPWaitFieldsPreserveMissingZeroAndUint64Values(t *testing.T) {
 	defer data.Close()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{response: rpcResponse{status: statusValue, value: statsPayloadWithWaitFields(t, test.fields)}}
+			client := &fakeClient{response: rpcResponse{status: statusValue, value: statsPayloadWithOptionalFields(t, test.fields)}}
 			response := httptest.NewRecorder()
 			newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
 			if response.Code != http.StatusOK {
@@ -173,7 +197,7 @@ func TestStatsHTTPWaitFieldsPreserveMissingZeroAndUint64Values(t *testing.T) {
 			if string(result["schema_version"]) != "1" || strings.Contains(response.Body.String(), "SENSITIVE") {
 				t.Fatalf("version changed or unknown metadata leaked: %s", response.Body.String())
 			}
-			for section, names := range waitStatsFields {
+			for section, names := range optionalStatsFields {
 				var fields map[string]json.RawMessage
 				if err := json.Unmarshal(result[section], &fields); err != nil {
 					t.Fatal(err)
@@ -194,15 +218,15 @@ func TestStatsHTTPWaitFieldsPreserveMissingZeroAndUint64Values(t *testing.T) {
 	}
 }
 
-func TestStatsHTTPRejectsInvalidWaitFieldValues(t *testing.T) {
+func TestStatsHTTPRejectsInvalidOptionalFieldValues(t *testing.T) {
 	data := newRPCClient("unused", 1, time.Second)
 	defer data.Close()
-	for section, names := range waitStatsFields {
+	for section, names := range optionalStatsFields {
 		for _, name := range names {
 			for _, invalid := range []string{`-1`, `18446744073709551616`, `1.5`, `true`, `"7"`, `{}`, `[]`} {
 				t.Run(section+"/"+name+"/"+invalid, func(t *testing.T) {
 					fields := map[string]map[string]json.RawMessage{section: {name: json.RawMessage(invalid)}}
-					client := &fakeClient{response: rpcResponse{status: statusValue, value: statsPayloadWithWaitFields(t, fields)}}
+					client := &fakeClient{response: rpcResponse{status: statusValue, value: statsPayloadWithOptionalFields(t, fields)}}
 					response := httptest.NewRecorder()
 					newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
 					var result runtimeStats
@@ -211,7 +235,7 @@ func TestStatsHTTPRejectsInvalidWaitFieldValues(t *testing.T) {
 					}
 					if response.Code != http.StatusBadGateway || result.Error != "invalid_backend_stats" ||
 						result.SchemaVersion != 1 || result.Engine != nil || result.Server != nil || result.Gateway == nil {
-						t.Fatalf("invalid wait field was accepted or lost gateway state: code=%d result=%#v", response.Code, result)
+						t.Fatalf("invalid optional field was accepted or lost gateway state: code=%d result=%#v", response.Code, result)
 					}
 					if strings.Contains(response.Body.String(), "SENSITIVE") {
 						t.Fatalf("backend metadata leaked through validation error: %s", response.Body.String())

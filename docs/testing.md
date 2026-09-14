@@ -11,8 +11,8 @@ make sanitize-test
 
 | 命令 | 实际执行内容 |
 | --- | --- |
-| `make test` | 构建 C++ 引擎、Go 网关与压测工具；运行三个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
-| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及三个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
+| `make test` | 构建 C++ 引擎、Go 网关与压测工具；运行四个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
+| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及四个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
 | `make experiment-test` | 使用 Python 标准库验证元数据采样、隔离实验、报告汇总与子进程清理；不需要提前构建服务 |
@@ -27,6 +27,7 @@ make sanitize-test
 | --- | --- | --- |
 | 存储与恢复 | 二进制值、并发写入、group commit、目录独占、旧数据导入、并发关闭、WAL 尾部修复、校验和错误与文件缺失 | [engine_test.cpp](../tests/engine_test.cpp) |
 | WAL 并发 | 暂停 WAL 同步时吞吐模式请求仍可执行；未同步批次仍占用队列额度；可靠模式按批次确认；关闭时排空正在同步和待写的批次 | [engine_test.cpp](../tests/engine_test.cpp) |
+| 异步确认 | 分批目标、GET 捕获值、删除未命中、名额拒绝无副作用、回调恰好一次、异常隔离、重入保护与关闭排空 | [async_test.cpp](../tests/async_test.cpp) |
 | 快照并发 | 快照文件写盘期间可靠读写继续完成；快照捕获固定版本；自动快照、多个快照串行执行、关闭等待快照、WAL 替换保留后续写入 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 故障边界 | WAL/快照 I/O 故障注入、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | HTTP 与 RPC | 参数与状态码映射、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
@@ -38,7 +39,7 @@ make sanitize-test
 | 实验汇总 | 完整计划与失败轮次、配置和日志序列对账、资源进程身份、缺失值与多格式输出；搬移后的归档仍可只读复查 | [experiment_summary_test.py](../tests/experiment_summary_test.py) |
 | 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、1 MiB value、客户端 RST、非法帧、队列过载、停机响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
 
-端到端测试还验证数据 worker、数据队列和网关 RPC 名额被占用时，`/stats` 仍可返回；引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
+端到端测试还验证：可靠确认释放 worker，但继续占用请求名额；WAL 容量阻塞 worker、数据队列和网关 RPC 名额时，`/stats` 仍可返回；断连后旧请求不会释放名额供重连绕过限制；网络停机宽限结束后，异步回调仍能排空且数据可恢复。引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
 
 这些检查分别验证具体并发交错、错误处理和恢复边界。进程退出测试不等同于真实断电测试；文件同步的持久性仍依赖操作系统、文件系统和设备履行 `fdatasync/fsync` 约定。已有回归检查也不代表已经测得性能提升。
 
@@ -61,11 +62,11 @@ ThreadSanitizer 使用独立构建目录，与 ASan/UBSan 检查分开运行：
 cmake -S cpp_engine -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
   '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
   -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
-cmake --build build-tsan --target engine_test snapshot_test stats_test -j2
+cmake --build build-tsan --target engine_test snapshot_test stats_test async_test -j2
 TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
 ```
 
-该命令覆盖存储、快照和运行状态三个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
+该命令覆盖存储、快照、运行状态和异步确认四个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
 
 如果 TSan 在测试启动前报告 `unexpected memory mapping`，在支持 `setarch` 的 x86_64 Linux 环境中，可以仅对本次测试进程及其子进程关闭地址随机化后重试：
 

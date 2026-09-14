@@ -165,11 +165,21 @@ class MiniKVIntegration(unittest.TestCase):
         finally:
             connection.close()
 
+    def wait_stats(self, predicate, message, timeout=2):
+        deadline = time.monotonic() + timeout
+        while True:
+            code, stats = self.runtime_stats()
+            self.assertEqual(code, 200)
+            if predicate(stats):
+                return stats
+            self.assertLess(time.monotonic(), deadline, message)
+            time.sleep(0.005)
+
     def test_runtime_stats_and_recovery(self):
         self.assertEqual(self.request("POST", "private-key", "private-value"), (200, b"OK\n"))
         self.assertEqual(self.request("GET", "private-key"), (200, b"VALUE private-value\n"))
-        code, stats = self.runtime_stats()
-        self.assertEqual(code, 200)
+        stats = self.wait_stats(lambda s: s["server"]["requests_inflight"] == 0 and
+                               s["engine"]["async_requests_inflight"] == 0, "completed requests did not release capacity")
         self.assertEqual(stats["schema_version"], 1)
         self.assertEqual(stats["engine"]["keys"], 1)
         self.assertEqual(stats["engine"]["wal_mode"], "reliable")
@@ -183,8 +193,13 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(stats["engine"]["wal_durable_waiters"], 0)
         self.assertEqual(stats["engine"]["wal_durable_waits_total"], 1)
         self.assertGreater(stats["engine"]["wal_durable_wait_duration_ns_total"], 0)
+        self.assertEqual(stats["engine"]["async_requests_inflight"], 0)
+        self.assertEqual(stats["engine"]["async_requests_capacity"], 130)
+        self.assertEqual(stats["engine"]["async_callback_failures_total"], 0)
         self.assertFalse(stats["engine"]["io_failed"])
         self.assertEqual(stats["server"]["workers_capacity"], 2)
+        self.assertEqual(stats["server"]["requests_inflight"], 0)
+        self.assertEqual(stats["server"]["requests_capacity"], 130)
         self.assertEqual(stats["server"]["requests_started_total"], 2)
         self.assertIsInstance(stats["server"]["request_queue_wait_duration_ns_total"], int)
         self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 2)
@@ -223,7 +238,7 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(recovered["server"]["request_queue_wait_duration_ns_total"], 0)
         self.assertEqual(recovered["gateway"]["rpc"]["calls_total"], 2)
 
-    def test_stats_progress_while_data_workers_and_rpc_pool_wait(self):
+    def test_durable_confirmation_releases_worker_but_keeps_request_capacity(self):
         self.stop("gateway")
         self.stop("engine")
         self.engine_env.update({"MINIKV_WORKERS": "1", "MINIKV_REQUEST_QUEUE_SIZE": "1",
@@ -242,57 +257,152 @@ class MiniKVIntegration(unittest.TestCase):
         writer = threading.Thread(target=write)
         writer.start()
         try:
-            deadline = time.monotonic() + 2
-            while True:
-                code, stats = self.runtime_stats()
-                self.assertEqual(code, 200)
-                if stats["engine"]["applied_sequence"] == 1:
-                    break
-                self.assertLess(time.monotonic(), deadline, "write was not admitted")
-                time.sleep(0.005)
+            stats = self.wait_stats(
+                lambda s: s["engine"]["wal_durable_waiters"] == 1 and s["server"]["workers_active"] == 0,
+                "write did not release its worker while waiting for durability")
             self.assertEqual(stats["engine"]["durable_sequence"], 0)
             self.assertGreater(stats["engine"]["wal_pending_bytes"], 0)
             self.assertEqual(stats["engine"]["wal_durable_waiters"], 1)
             self.assertEqual(stats["engine"]["wal_durable_waits_total"], 0)
             self.assertEqual(stats["engine"]["wal_durable_wait_duration_ns_total"], 0)
             self.assertEqual(stats["engine"]["wal_capacity_waiters"], 0)
-            self.assertEqual(stats["server"]["workers_active"], 1)
+            self.assertEqual(stats["server"]["requests_inflight"], 1)
+            self.assertEqual(stats["server"]["requests_capacity"], 2)
+            self.assertEqual(stats["engine"]["async_requests_inflight"], 1)
+            self.assertEqual(stats["engine"]["async_requests_capacity"], 2)
             self.assertEqual(stats["server"]["requests_started_total"], 1)
             first_queue_wait = stats["server"]["request_queue_wait_duration_ns_total"]
             self.assertEqual(stats["gateway"]["rpc"]["pool_in_use"], 1)
-            with self.rpc_socket() as queued, self.rpc_socket() as rejected:
-                queued.sendall(frame(2, b"waiting"))
-                while True:
-                    code, stats = self.runtime_stats()
-                    self.assertEqual(code, 200)
-                    if stats["server"]["request_queue_depth"] == 1:
-                        break
-                    self.assertLess(time.monotonic(), deadline, "read was not queued")
-                    time.sleep(0.005)
+            with self.rpc_socket() as waiting, self.rpc_socket() as rejected:
+                waiting.sendall(frame(2, b"waiting"))
+                stats = self.wait_stats(
+                    lambda s: s["engine"]["wal_durable_waiters"] == 2 and s["server"]["workers_active"] == 0,
+                    "the same worker did not submit the second durable wait")
+                self.assertEqual(stats["server"]["request_queue_depth"], 0)
+                self.assertEqual(stats["server"]["requests_inflight"], 2)
+                self.assertEqual(stats["engine"]["async_requests_inflight"], 2)
                 rejected.sendall(frame(2, b"waiting"))
                 self.assertEqual(read_response(rejected)[0], 5)
                 code, stats = self.runtime_stats()
                 self.assertEqual(code, 200)
                 self.assertGreaterEqual(stats["server"]["requests_rejected_total"], 1)
-                self.assertEqual(stats["server"]["requests_started_total"], 1)
-                self.assertEqual(stats["server"]["request_queue_wait_duration_ns_total"], first_queue_wait)
+                self.assertEqual(stats["server"]["requests_started_total"], 2)
+                self.assertGreaterEqual(stats["server"]["request_queue_wait_duration_ns_total"], first_queue_wait)
                 self.assertEqual(stats["engine"]["durable_sequence"], 0)
                 self.assertEqual(results, [], "data write completed before Stats sampled its wait")
-                queued.settimeout(5)
-                self.assertEqual(read_response(queued), (1, b"durable"))
+                waiting.settimeout(5)
+                self.assertEqual(read_response(waiting), (1, b"durable"))
         finally:
             writer.join(timeout=6)
         self.assertFalse(writer.is_alive())
         self.assertEqual(results, [(200, b"OK\n")])
-        code, stats = self.runtime_stats()
-        self.assertEqual(code, 200)
+        stats = self.wait_stats(lambda s: s["server"]["requests_inflight"] == 0 and
+                               s["engine"]["async_requests_inflight"] == 0, "completed requests did not release capacity")
         self.assertEqual(stats["engine"]["durable_sequence"], 1)
         self.assertEqual(stats["engine"]["wal_pending_bytes"], 0)
         self.assertEqual(stats["engine"]["wal_durable_waiters"], 0)
-        self.assertEqual(stats["engine"]["wal_durable_waits_total"], 1)
+        self.assertEqual(stats["engine"]["wal_durable_waits_total"], 2)
         self.assertGreater(stats["engine"]["wal_durable_wait_duration_ns_total"], 0)
+        self.assertEqual(stats["engine"]["async_requests_inflight"], 0)
+        self.assertEqual(stats["server"]["requests_inflight"], 0)
         self.assertEqual(stats["server"]["requests_started_total"], 2)
         self.assertGreater(stats["server"]["request_queue_wait_duration_ns_total"], first_queue_wait)
+
+    def test_stats_progress_while_wal_capacity_blocks_worker_and_rpc_pool(self):
+        self.stop("gateway")
+        self.stop("engine")
+        self.engine_env.update({"MINIKV_WORKERS": "1", "MINIKV_REQUEST_QUEUE_SIZE": "1",
+                                "MINIKV_WAL_MODE": "throughput", "MINIKV_WAL_QUEUE_BYTES": str(2 * 1024 * 1024),
+                                "MINIKV_WAL_FLUSH_MS": "3000", "MINIKV_SNAPSHOT_INTERVAL_MS": "0"})
+        self.gateway_env.update({"MINIKV_RPC_POOL_SIZE": "1", "MINIKV_RPC_TIMEOUT_MS": "5000"})
+        self.start_engine()
+        self.start_gateway()
+        value = "x" * (1024 * 1024)
+        # Two maximum values plus their WAL headers cannot fit in 2 MiB.
+        self.assertEqual(self.request("POST", "first", value), (200, b"OK\n"))
+        results = []
+
+        def write():
+            try:
+                results.append(self.request("POST", "waiting", value))
+            except Exception as error:
+                results.append(error)
+
+        writer = threading.Thread(target=write)
+        writer.start()
+        try:
+            stats = self.wait_stats(lambda s: s["engine"]["wal_capacity_waiters"] == 1,
+                                    "second write did not wait for WAL capacity")
+            self.assertEqual(stats["engine"]["wal_durable_waiters"], 0)
+            self.assertEqual(stats["engine"]["wal_capacity_waits_total"], 0)
+            self.assertEqual(stats["server"]["workers_active"], 1)
+            self.assertEqual(stats["gateway"]["rpc"]["pool_in_use"], 1)
+            first_queue_wait = stats["server"]["request_queue_wait_duration_ns_total"]
+            with self.rpc_socket() as queued, self.rpc_socket() as rejected:
+                queued.sendall(frame(2, b"waiting"))
+                stats = self.wait_stats(lambda s: s["server"]["request_queue_depth"] == 1,
+                                        "read did not queue behind the capacity wait")
+                self.assertEqual(stats["server"]["requests_inflight"], 2)
+                rejected.sendall(frame(2, b"waiting"))
+                self.assertEqual(read_response(rejected)[0], 5)
+                code, stats = self.runtime_stats()
+                self.assertEqual(code, 200)
+                self.assertEqual(stats["server"]["requests_started_total"], 2)
+                self.assertEqual(stats["server"]["request_queue_wait_duration_ns_total"], first_queue_wait)
+                self.assertGreaterEqual(stats["server"]["requests_rejected_total"], 1)
+                self.assertEqual(results, [])
+                queued.settimeout(5)
+                self.assertEqual(read_response(queued), (1, value.encode()))
+        finally:
+            writer.join(timeout=6)
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(results, [(200, b"OK\n")])
+        stats = self.wait_stats(lambda s: s["server"]["requests_inflight"] == 0,
+                               "completed requests did not release capacity")
+        self.assertEqual(stats["engine"]["applied_sequence"], 2)
+        self.assertEqual(stats["engine"]["wal_capacity_waiters"], 0)
+        self.assertEqual(stats["engine"]["wal_capacity_waits_total"], 1)
+        self.assertGreater(stats["engine"]["wal_capacity_wait_duration_ns_total"], 0)
+        self.assertEqual(stats["engine"]["wal_durable_waits_total"], 0)
+        self.assertEqual(stats["server"]["requests_started_total"], 3)
+        self.assertEqual(stats["server"]["requests_inflight"], 0)
+        self.assertGreater(stats["server"]["request_queue_wait_duration_ns_total"], first_queue_wait)
+
+    def test_disconnect_does_not_release_pending_request_capacity(self):
+        self.stop("gateway")
+        self.stop("engine")
+        self.engine_env.update({"MINIKV_WORKERS": "1", "MINIKV_REQUEST_QUEUE_SIZE": "1",
+                                "MINIKV_CLIENT_IDLE_MS": "50", "MINIKV_WAL_FLUSH_MS": "3000",
+                                "MINIKV_SNAPSHOT_INTERVAL_MS": "0"})
+        self.start_engine()
+        self.start_gateway()
+        value = b"v" * 65536
+        with self.rpc_socket() as writer:
+            writer.sendall(frame(1, b"retained", value))
+            self.wait_stats(lambda s: s["engine"]["wal_durable_waiters"] == 1, "write was not admitted")
+        with self.rpc_socket() as reader:
+            reader.sendall(frame(2, b"retained"))
+            self.wait_stats(lambda s: s["engine"]["wal_durable_waiters"] == 2, "read was not admitted")
+        # Wait until the reactor has actually removed the old busy sockets.
+        # Their captured replies must still consume request capacity.
+        stats = self.wait_stats(lambda s: s["server"]["connections"] == 1, "old connections did not expire")
+        self.assertEqual(stats["server"]["requests_inflight"], 2)
+        for _ in range(12):
+            with self.rpc_socket() as rejected:
+                rejected.sendall(frame(2, b"retained"))
+                self.assertEqual(read_response(rejected)[0], 5)
+        code, stats = self.runtime_stats()
+        self.assertEqual(code, 200)
+        self.assertEqual(stats["engine"]["durable_sequence"], 0)
+        self.assertEqual(stats["engine"]["async_requests_inflight"], 2)
+        self.assertEqual(stats["server"]["requests_inflight"], 2)
+        self.assertEqual(stats["server"]["requests_started_total"], 2)
+        self.assertGreaterEqual(stats["server"]["requests_rejected_total"], 12)
+        self.wait_stats(lambda s: s["server"]["requests_inflight"] == 0 and
+                        s["engine"]["async_requests_inflight"] == 0, "discarded completions retained capacity", timeout=5)
+        with self.rpc_socket() as recovered:
+            recovered.sendall(frame(2, b"retained"))
+            self.assertEqual(read_response(recovered), (1, value))
 
     def test_binary_values_snapshot_and_restart(self):
         key = "tenant:1 \n\x00"
@@ -423,7 +533,7 @@ class MiniKVIntegration(unittest.TestCase):
                 sock.sendall(frame(1, f"shutdown-{index}".encode(), b"value"))
             readable, _, _ = select.select(clients, [], [], 2)
             self.assertTrue(readable, "no admission/overload response")
-            # A full queue proves at least one request was admitted. Its
+            # Exhausted request capacity proves a request was admitted. Its
             # reliable-mode acknowledgement is still waiting on the flush.
             gate = readable[0]
             self.assertEqual(read_response(gate)[0], 5)
@@ -439,6 +549,28 @@ class MiniKVIntegration(unittest.TestCase):
                     pass  # A request that was not admitted may be disconnected.
             self.assertGreater(acknowledged, 0, "shutdown discarded all admitted responses")
         self.stop("engine")
+
+    def test_shutdown_drains_async_replies_after_network_grace_expires(self):
+        self.stop("gateway")
+        self.stop("engine")
+        self.engine_env.update({"MINIKV_WAL_FLUSH_MS": "6000", "MINIKV_SNAPSHOT_INTERVAL_MS": "0"})
+        self.start_engine()
+        self.start_gateway()
+        with self.rpc_socket() as sock:
+            sock.sendall(frame(1, b"late-shutdown", b"recoverable"))
+            self.wait_stats(lambda s: s["engine"]["wal_durable_waiters"] == 1, "write was not admitted")
+            self.stop("gateway")
+            self.engine.terminate()
+            sock.settimeout(8)
+            # The network grace ends before the six-second WAL timer. The
+            # completion target must remain alive after the socket is gone.
+            with self.assertRaises((EOFError, ConnectionResetError)):
+                read_response(sock)
+            self.engine.wait(timeout=5)
+        self.stop("engine")
+        self.start_engine()
+        self.start_gateway()
+        self.assertEqual(self.request("GET", "late-shutdown"), (200, b"VALUE recoverable\n"))
 
     def test_mixed_benchmark_has_no_system_failures(self):
         result = subprocess.run([

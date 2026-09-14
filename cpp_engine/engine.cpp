@@ -11,6 +11,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <system_error>
@@ -20,6 +21,14 @@ namespace minikv {
 namespace {
 
 using StatsClock = std::chrono::steady_clock;
+
+thread_local const Engine* callback_engine = nullptr;
+
+struct CallbackScope {
+    const Engine* previous = callback_engine;
+    explicit CallbackScope(const Engine* engine) { callback_engine = engine; }
+    ~CallbackScope() { callback_engine = previous; }
+};
 
 uint64_t elapsed_ns(StatsClock::time_point start) {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(StatsClock::now() - start).count());
@@ -64,6 +73,33 @@ void wait_with_stats(std::condition_variable& condition, std::unique_lock<std::m
     if (ready()) return;
     TimedWait timer(waiters, completed, duration);
     condition.wait(lock, ready);
+}
+
+// Declare before the state lock. On a pre-transfer return/exception, destroy
+// callback captures outside the lock before releasing their slot; close/drain
+// must not finish while those resources are still live.
+template <class Resources> struct AsyncReservation {
+    const Engine* engine;
+    std::mutex& mutex;
+    std::condition_variable& changed;
+    uint64_t& inflight;
+    Resources resources;
+    bool owned = false;
+    ~AsyncReservation() {
+        CallbackScope callback_scope(engine);
+        resources.clear();
+        if (!owned) return;
+        std::lock_guard<std::mutex> lock(mutex);
+        --inflight;
+        changed.notify_all();
+    }
+};
+
+// The notifier must still deliver an error if copying diagnostic text fails.
+void response_error(Response& response, std::string_view message) noexcept {
+    response.status = Status::IOError;
+    try { response.value.assign(message.data(), message.size()); }
+    catch (...) { response.value.clear(); }
 }
 
 struct File {
@@ -135,7 +171,7 @@ std::string snapshot_header(uint64_t sequence, uint64_t size) {
 
 Engine::Engine(EngineConfig config) : config_(std::move(config)) {
     if (config_.data_dir.empty() || config_.wal_batch_size == 0 || config_.wal_flush_interval.count() <= 0 ||
-        config_.snapshot_interval.count() < 0 ||
+        config_.snapshot_interval.count() < 0 || config_.max_async_requests == 0 ||
         config_.wal_queue_bytes < kMaxKeySize + kMaxValueSize + codec::kRecordHeader + 4) {
         throw std::invalid_argument("invalid engine configuration");
     }
@@ -147,17 +183,20 @@ Engine::Engine(EngineConfig config) : config_(std::move(config)) {
         if (::flock(lock_fd_, LOCK_EX | LOCK_NB) != 0) io_error("data directory is already in use");
         recover();
         worker_ = std::thread(&Engine::background_work, this);
+        reply_worker_ = std::thread(&Engine::background_replies, this);
         if (config_.snapshot_interval.count() > 0) snapshot_worker_ = std::thread(&Engine::background_snapshots, this);
     } catch (...) {
-        // A second thread can fail to start after the WAL worker was created.
+        // A later thread can fail to start after another worker was created.
         {
             std::lock_guard<std::mutex> lock(mutex_);
             stopping_ = true;
             wake_.notify_all();
             snapshot_wake_.notify_all();
+            committed_.notify_all();
         }
         if (worker_.joinable()) worker_.join();
         if (snapshot_worker_.joinable()) snapshot_worker_.join();
+        if (reply_worker_.joinable()) reply_worker_.join();
         release_files();
         throw;
     }
@@ -328,33 +367,22 @@ void Engine::fail_locked(const std::string& message) {
     committed_.notify_all();
 }
 
-Response Engine::execute(const Request& request) {
-    if (!codec::valid_request(request)) return {Status::Invalid, "invalid operation or key/value length"};
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (!failure_.empty()) return {Status::IOError, failure_};
-    if (stopping_) return {Status::Busy, "engine is stopping"};
+Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_lock<std::mutex>& lock) {
+    if (!failure_.empty()) return {{Status::IOError, failure_}};
+    if (stopping_) return {{Status::Busy, "engine is stopping"}};
     if (request.operation == Operation::Get) {
         const auto it = kv_.find(request.key);
         Response result = it == kv_.end() ? Response{Status::NotFound, {}} : Response{Status::Value, it->second};
-        const uint64_t observed = applied_sequence_;
-        if (config_.wal_mode == WalMode::Reliable) {
-            wait_with_stats(committed_, lock,
-                            [&] { return stopping_ || !failure_.empty() || durable_sequence_ >= observed; },
-                            stats_.wal_durable_waiters, stats_.wal_durable_waits_total,
-                            stats_.wal_durable_wait_duration_ns_total);
-            if (!failure_.empty()) return {Status::IOError, failure_};
-            if (durable_sequence_ < observed) return {Status::IOError, "shutdown before observed state was durable"};
-        }
-        return result;
+        return {std::move(result), applied_sequence_, config_.wal_mode == WalMode::Reliable};
     }
     const size_t size = codec::kRecordHeader + request.key.size() + request.value.size() + 4;
     wait_with_stats(committed_, lock,
                     [&] { return stopping_ || !failure_.empty() || pending_bytes_ + size <= config_.wal_queue_bytes; },
                     stats_.wal_capacity_waiters, stats_.wal_capacity_waits_total,
                     stats_.wal_capacity_wait_duration_ns_total);
-    if (!failure_.empty()) return {Status::IOError, failure_};
-    if (stopping_) return {Status::Busy, "engine is stopping"};
-    if (applied_sequence_ == std::numeric_limits<uint64_t>::max()) return {Status::IOError, "sequence exhausted"};
+    if (!failure_.empty()) return {{Status::IOError, failure_}};
+    if (stopping_) return {{Status::Busy, "engine is stopping"}};
+    if (applied_sequence_ == std::numeric_limits<uint64_t>::max()) return {{Status::IOError, "sequence exhausted"}};
     const uint64_t sequence = applied_sequence_ + 1;
     Status status = Status::Ok;
     try {
@@ -366,18 +394,73 @@ Response Engine::execute(const Request& request) {
         applied_sequence_ = sequence;
     } catch (const std::exception& error) {
         fail_locked(error.what());
-        return {Status::IOError, failure_};
+        return {{Status::IOError, failure_}};
     }
     wake_.notify_one();
-    if (config_.wal_mode == WalMode::Reliable) {
+    return {{status, {}}, sequence, config_.wal_mode == WalMode::Reliable};
+}
+
+Response Engine::execute(const Request& request) {
+    if (!codec::valid_request(request)) return {Status::Invalid, "invalid operation or key/value length"};
+    std::unique_lock<std::mutex> lock(mutex_);
+    auto applied = apply_locked(request, lock);
+    if (applied.confirm) {
         wait_with_stats(committed_, lock,
-                        [&] { return stopping_ || !failure_.empty() || durable_sequence_ >= sequence; },
+                        [&] { return stopping_ || !failure_.empty() || durable_sequence_ >= applied.target; },
                         stats_.wal_durable_waiters, stats_.wal_durable_waits_total,
                         stats_.wal_durable_wait_duration_ns_total);
         if (!failure_.empty()) return {Status::IOError, failure_};
-        if (durable_sequence_ < sequence) return {Status::IOError, "shutdown before durable acknowledgement"};
+        if (durable_sequence_ < applied.target) {
+            return {Status::IOError, request.operation == Operation::Get
+                ? "shutdown before observed state was durable" : "shutdown before durable acknowledgement"};
+        }
     }
-    return {status, {}};
+    return std::move(applied.response);
+}
+
+std::optional<Response> Engine::execute_async(const Request& request, AsyncCompletion completion) {
+    if (!completion) throw std::invalid_argument("async completion must not be empty");
+    if (!codec::valid_request(request)) return Response{Status::Invalid, "invalid operation or key/value length"};
+    AsyncReservation<std::list<PendingReply>> reservation{this, mutex_, committed_, stats_.async_requests_inflight, {}};
+    auto& prepared = reservation.resources;
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!failure_.empty()) return Response{Status::IOError, failure_};
+    if (stopping_) return Response{Status::Busy, "engine is stopping"};
+
+    const bool may_defer = config_.wal_mode == WalMode::Reliable &&
+        (request.operation != Operation::Get || durable_sequence_ < applied_sequence_);
+    if (may_defer) {
+        if (stats_.async_requests_inflight >= config_.max_async_requests) {
+            return Response{Status::Busy, "async request limit reached"};
+        }
+        // Both capacity and the list node are reserved before applying a write.
+        // A WAL-capacity wait may release the lock; this slot stays charged.
+        prepared.emplace_back();
+        prepared.back().completion = std::move(completion);
+        ++stats_.async_requests_inflight;
+        reservation.owned = true;
+    }
+
+    auto applied = apply_locked(request, lock);
+    if (!applied.confirm || durable_sequence_ >= applied.target) return std::move(applied.response);
+
+    // Nothing after transfer can allocate or throw. Commit/failure/close cannot
+    // race between capture, target comparison and registration under this lock.
+    auto& reply = prepared.front();
+    reply.response = std::move(applied.response);
+    reply.target = applied.target;
+    reply.wait_started = StatsClock::now();
+    ++stats_.wal_durable_waiters;
+    pending_replies_.splice(pending_replies_.end(), prepared);
+    reservation.owned = false;
+    committed_.notify_all();
+    return std::nullopt;
+}
+
+void Engine::drain_async() {
+    if (callback_engine == this) throw std::logic_error("cannot drain engine from its async callback");
+    std::unique_lock<std::mutex> lock(mutex_);
+    committed_.wait(lock, [this] { return stats_.async_requests_inflight == 0; });
 }
 
 void Engine::write_batch(const std::deque<PendingRecord>& records) {
@@ -627,6 +710,45 @@ void Engine::background_snapshots() {
     }
 }
 
+void Engine::background_replies() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (true) {
+        committed_.wait(lock, [this] {
+            return (stopping_ && stats_.async_requests_inflight == 0) ||
+                (!pending_replies_.empty() &&
+                 (stopping_ || !failure_.empty() || pending_replies_.front().target <= durable_sequence_));
+        });
+        if (stopping_ && stats_.async_requests_inflight == 0) return;
+
+        std::list<PendingReply> ready;
+        ready.splice(ready.end(), pending_replies_, pending_replies_.begin());
+        auto& reply = ready.front();
+        --stats_.wal_durable_waiters;
+        ++stats_.wal_durable_waits_total;
+        stats_.wal_durable_wait_duration_ns_total += elapsed_ns(reply.wait_started);
+        // Match execute's error precedence at the moment this waiter reacquires
+        // state. Later commits/failures cannot change the already chosen reply.
+        if (!failure_.empty()) response_error(reply.response, failure_);
+        else if (durable_sequence_ < reply.target) {
+            response_error(reply.response, "shutdown before durable acknowledgement");
+        }
+        lock.unlock();
+        bool failed = false;
+        {
+            CallbackScope callback_scope(this);
+            try { reply.completion(std::move(reply.response)); }
+            catch (...) { failed = true; }
+            // Captured objects may consult stats in their destructors. Release
+            // them with no engine locks, before publishing that the slot is free.
+            ready.clear();
+        }
+        lock.lock();
+        if (failed) ++stats_.async_callback_failures_total;
+        --stats_.async_requests_inflight;
+        committed_.notify_all();
+    }
+}
+
 uint64_t Engine::durable_sequence() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return durable_sequence_;
@@ -642,12 +764,16 @@ EngineStats Engine::stats() const {
     result.wal_pending_bytes = pending_bytes_;
     result.wal_queued_records = pending_.size();
     result.wal_queue_capacity_bytes = config_.wal_queue_bytes;
+    result.async_requests_capacity = config_.max_async_requests;
     result.io_failed = !failure_.empty();
     result.stopping = stopping_;
     return result;
 }
 
 void Engine::close() {
+    // Check before close_mutex_: another thread may already hold it while
+    // joining this notifier. Neither self-join nor that lock cycle is allowed.
+    if (callback_engine == this) throw std::logic_error("cannot close engine from its async callback");
     // Joining the background worker must also be serialized across callers.
     std::lock_guard<std::mutex> close_lock(close_mutex_);
     {
@@ -660,15 +786,21 @@ void Engine::close() {
     }
     if (worker_.joinable()) worker_.join();
     if (snapshot_worker_.joinable()) snapshot_worker_.join();
-    std::lock_guard<std::mutex> snapshot_lock(snapshot_mutex_);
-    std::lock_guard<std::mutex> io_lock(io_mutex_);
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (failure_.empty()) {
-        try { flush_locked(); }
-        catch (const std::exception&) { /* Preserve the failure while still releasing descriptors. */ }
+    {
+        std::lock_guard<std::mutex> snapshot_lock(snapshot_mutex_);
+        std::lock_guard<std::mutex> io_lock(io_mutex_);
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (failure_.empty()) {
+            try { flush_locked(); }
+            catch (const std::exception&) { /* Preserve the failure while still releasing descriptors. */ }
+        }
+        closed_ = true;
+        release_files();
     }
-    closed_ = true;
-    release_files();
+    // Callbacks may acquire state (e.g. stats), so never join under these locks.
+    // The notifier also waits for reserved submitters to return on shutdown.
+    if (reply_worker_.joinable()) reply_worker_.join();
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!failure_.empty()) throw std::runtime_error(failure_);
 }
 

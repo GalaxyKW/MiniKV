@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <list>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -30,11 +32,14 @@ struct Response {
     std::string value;
 };
 
+using AsyncCompletion = std::function<void(Response)>;
+
 struct EngineConfig {
     std::string data_dir = "./data";
     WalMode wal_mode = WalMode::Throughput;
     size_t wal_batch_size = 512;
     size_t wal_queue_bytes = 16 * 1024 * 1024;
+    size_t max_async_requests = 148;
     std::chrono::milliseconds wal_flush_interval{100};
     std::chrono::milliseconds snapshot_interval{20 * 60 * 1000};
     // Tests can fail or terminate at an actual I/O boundary. Must be thread-safe:
@@ -63,6 +68,11 @@ struct EngineStats {
     uint64_t wal_durable_waiters = 0;
     uint64_t wal_durable_waits_total = 0;
     uint64_t wal_durable_wait_duration_ns_total = 0;
+    // Includes reserved submissions and callbacks until their resources are
+    // released. Completed durable waits can still occupy an async request slot.
+    uint64_t async_requests_inflight = 0;
+    uint64_t async_requests_capacity = 0;
+    uint64_t async_callback_failures_total = 0;
     uint64_t wal_commits_total = 0;
     uint64_t wal_commit_failures_total = 0;
     uint64_t wal_commit_duration_ns_total = 0;
@@ -86,6 +96,17 @@ public:
     Engine& operator=(const Engine&) = delete;
 
     Response execute(const Request& request);
+    // A value is an immediate response: completion is never invoked. nullopt
+    // transfers completion to the engine, which invokes it exactly once, even
+    // on failure/close and possibly before execute_async returns. Only durable
+    // confirmation is deferred; WAL capacity can still block this call.
+    // A nonempty callback is required. Exceptions occur only before transfer.
+    std::optional<Response> execute_async(const Request& request, AsyncCompletion completion);
+    // Stop submitting and join submitting workers first. Waits for transferred
+    // callbacks and their resources, not network delivery. A stalled callback
+    // stalls drain/close. Callbacks run outside engine locks and may call stats,
+    // but must not call drain_async/close or destroy this engine.
+    void drain_async();
     void snapshot();
     void close();
     uint64_t durable_sequence() const;
@@ -97,6 +118,20 @@ private:
         std::string bytes;
     };
 
+    struct AppliedRequest {
+        Response response;
+        uint64_t target = 0;
+        bool confirm = false;
+    };
+
+    struct PendingReply {
+        AsyncCompletion completion;
+        Response response{Status::Ok, {}};
+        uint64_t target = 0;
+        std::chrono::steady_clock::time_point wait_started;
+    };
+
+    AppliedRequest apply_locked(const Request& request, std::unique_lock<std::mutex>& lock);
     void recover();
     void load_snapshot();
     void load_wal();
@@ -110,6 +145,7 @@ private:
     void compact_wal(int64_t boundary);
     void background_work();
     void background_snapshots();
+    void background_replies();
     void hook(const std::string& point);
     void fail_locked(const std::string& message);
     void release_files() noexcept;
@@ -126,6 +162,9 @@ private:
     std::condition_variable committed_;
     std::unordered_map<std::string, std::string> kv_;
     std::deque<PendingRecord> pending_;
+    // Registration shares the state lock with apply and durable publication;
+    // targets are nondecreasing. Splicing a reserved node cannot allocate.
+    std::list<PendingReply> pending_replies_;
     size_t pending_bytes_ = 0; // Queued plus in-flight, not-yet-synced WAL bytes.
     uint64_t applied_sequence_ = 0;
     uint64_t durable_sequence_ = 0;
@@ -137,6 +176,7 @@ private:
     std::string failure_;
     std::thread worker_;
     std::thread snapshot_worker_;
+    std::thread reply_worker_;
 };
 
 } // namespace minikv
