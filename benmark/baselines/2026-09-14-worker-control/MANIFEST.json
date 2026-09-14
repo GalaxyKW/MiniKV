@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "runtime_revision": "25cec555f70e338baaf8dad1eec579589f79bf5f",
+  "description": "Raw synthetic reliable-mode controls of the synchronous durability-wait implementation, 20 data workers followed by 40. Both matrices used the same frozen executable hashes. Actual executable copies and generated data omitted; all 12 runs and host context retained. Absolute paths are original-run provenance. These are not results for the subsequent asynchronous completion implementation.",
+  "archives": [
+    {
+      "name": "workers20",
+      "file": "workers20.tar.gz",
+      "sha256": "1c57c53901b9d84920776b2ffbe2d249eafd063819e313a4432ee08230f29d03",
+      "size_bytes": 356792,
+      "raw_bytes": 4597168,
+      "files": 69,
+      "runs": 6
+    },
+    {
+      "name": "workers40",
+      "file": "workers40.tar.gz",
+      "sha256": "4bbb9df907155def277ced66034b6801a8cb9bb36423844af795abe181345529",
+      "size_bytes": 286044,
+      "raw_bytes": 3668680,
+      "files": 69,
+      "runs": 6
+    }
+  ]
+}
