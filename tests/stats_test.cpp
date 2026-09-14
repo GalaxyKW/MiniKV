@@ -251,20 +251,44 @@ void snapshots_report_phases_failures_and_recovery() {
 
 void pool_reports_queued_and_active_work() {
     ThreadPool pool(1, 1);
+    const auto initial = pool.stats();
+    require(initial.started_total == 0 && initial.queue_wait_duration_ns_total == 0,
+            "new pool retained request timing counters");
     std::promise<void> started, release;
     auto entered = started.get_future();
     auto resume = release.get_future().share();
-    require(pool.enqueue([&] { started.set_value(); resume.wait_for(5s); }), "first task was rejected");
+    std::atomic<size_t> completed{0};
+    require(pool.enqueue([&] { started.set_value(); resume.wait_for(5s); ++completed; }), "first task was rejected");
     const bool active = entered.wait_for(2s) == std::future_status::ready;
-    const bool queued = pool.enqueue([] {});
-    const bool excess = pool.enqueue([] {});
+    const auto first = pool.stats();
+    const bool queued = pool.enqueue([&] { ++completed; });
+    const auto queued_before = std::chrono::steady_clock::now();
+    const bool excess = pool.enqueue([&] { ++completed; });
     const auto stats = pool.stats();
+    auto shutdown = std::async(std::launch::async, [&] { pool.shutdown(); });
+    const bool draining = shutdown.wait_for(20ms) == std::future_status::timeout;
+    const auto waiting = pool.stats();
+    const auto minimum_queued_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - queued_before).count();
     release.set_value();
-    pool.shutdown();
+    shutdown.get();
     require(active && queued && !excess && stats.active == 1 && stats.queued == 1 && stats.capacity == 1 && stats.workers == 1,
             "pool statistics conflated admitted work, queue capacity and workers");
+    require(draining && first.started_total == 1 && stats.started_total == 1 && waiting.started_total == 1 &&
+            stats.queue_wait_duration_ns_total == first.queue_wait_duration_ns_total &&
+            waiting.queue_wait_duration_ns_total == first.queue_wait_duration_ns_total,
+            "queue timing included rejected, still-queued, or executing task time");
     const auto stopped = pool.stats();
-    require(stopped.active == 0 && stopped.queued == 0, "pool statistics retained finished work");
+    require(stopped.active == 0 && stopped.queued == 0 && stopped.started_total == 2 && completed == 2,
+            "shutdown did not drain and count accepted tasks exactly once");
+    require(stopped.queue_wait_duration_ns_total - first.queue_wait_duration_ns_total >=
+                static_cast<uint64_t>(minimum_queued_ns),
+            "dequeued task timing omitted its wait for a worker");
+    require(!pool.enqueue([&] { ++completed; }), "shutdown accepted another task");
+    const auto rejected = pool.stats();
+    require(rejected.started_total == stopped.started_total &&
+            rejected.queue_wait_duration_ns_total == stopped.queue_wait_duration_ns_total && completed == 2,
+            "shutdown rejection changed task timing counters");
 }
 
 } // namespace

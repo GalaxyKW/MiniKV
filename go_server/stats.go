@@ -58,38 +58,48 @@ func (c *rpcClient) stats() rpcStats {
 }
 
 type engineStats struct {
-	WalMode                   string `json:"wal_mode"`
-	Keys                      uint64 `json:"keys"`
-	AppliedSequence           uint64 `json:"applied_sequence"`
-	DurableSequence           uint64 `json:"durable_sequence"`
-	WalPendingBytes           uint64 `json:"wal_pending_bytes"`
-	WalInflightBytes          uint64 `json:"wal_inflight_bytes"`
-	WalQueuedRecords          uint64 `json:"wal_queued_records"`
-	WalQueueCapacityBytes     uint64 `json:"wal_queue_capacity_bytes"`
-	WalCommitsTotal           uint64 `json:"wal_commits_total"`
-	WalCommitFailuresTotal    uint64 `json:"wal_commit_failures_total"`
-	WalCommitDurationNS       uint64 `json:"wal_commit_duration_ns_total"`
-	WalCommitLastDurationNS   uint64 `json:"wal_commit_last_duration_ns"`
-	SnapshotSuccessesTotal    uint64 `json:"snapshot_successes_total"`
-	SnapshotFailuresTotal     uint64 `json:"snapshot_failures_total"`
-	SnapshotInProgress        bool   `json:"snapshot_in_progress"`
-	SnapshotSequence          uint64 `json:"snapshot_sequence"`
-	SnapshotCaptureDurationNS uint64 `json:"snapshot_capture_duration_ns_total"`
-	SnapshotWriteDurationNS   uint64 `json:"snapshot_write_duration_ns_total"`
-	SnapshotCompactDurationNS uint64 `json:"snapshot_compact_duration_ns_total"`
-	IOFailed                  bool   `json:"io_failed"`
-	Stopping                  bool   `json:"stopping"`
+	WalMode                 string `json:"wal_mode"`
+	Keys                    uint64 `json:"keys"`
+	AppliedSequence         uint64 `json:"applied_sequence"`
+	DurableSequence         uint64 `json:"durable_sequence"`
+	WalPendingBytes         uint64 `json:"wal_pending_bytes"`
+	WalInflightBytes        uint64 `json:"wal_inflight_bytes"`
+	WalQueuedRecords        uint64 `json:"wal_queued_records"`
+	WalQueueCapacityBytes   uint64 `json:"wal_queue_capacity_bytes"`
+	WalCommitsTotal         uint64 `json:"wal_commits_total"`
+	WalCommitFailuresTotal  uint64 `json:"wal_commit_failures_total"`
+	WalCommitDurationNS     uint64 `json:"wal_commit_duration_ns_total"`
+	WalCommitLastDurationNS uint64 `json:"wal_commit_last_duration_ns"`
+	// Optional counters preserve the distinction between an older engine that
+	// does not report waits and a current engine that measured zero waits.
+	WalCapacityWaiters        *uint64 `json:"wal_capacity_waiters,omitempty"`
+	WalCapacityWaitsTotal     *uint64 `json:"wal_capacity_waits_total,omitempty"`
+	WalCapacityWaitDurationNS *uint64 `json:"wal_capacity_wait_duration_ns_total,omitempty"`
+	WalDurableWaiters         *uint64 `json:"wal_durable_waiters,omitempty"`
+	WalDurableWaitsTotal      *uint64 `json:"wal_durable_waits_total,omitempty"`
+	WalDurableWaitDurationNS  *uint64 `json:"wal_durable_wait_duration_ns_total,omitempty"`
+	SnapshotSuccessesTotal    uint64  `json:"snapshot_successes_total"`
+	SnapshotFailuresTotal     uint64  `json:"snapshot_failures_total"`
+	SnapshotInProgress        bool    `json:"snapshot_in_progress"`
+	SnapshotSequence          uint64  `json:"snapshot_sequence"`
+	SnapshotCaptureDurationNS uint64  `json:"snapshot_capture_duration_ns_total"`
+	SnapshotWriteDurationNS   uint64  `json:"snapshot_write_duration_ns_total"`
+	SnapshotCompactDurationNS uint64  `json:"snapshot_compact_duration_ns_total"`
+	IOFailed                  bool    `json:"io_failed"`
+	Stopping                  bool    `json:"stopping"`
 }
 
 type serverStats struct {
-	Connections              uint64 `json:"connections"`
-	ConnectionCapacity       uint64 `json:"connection_capacity"`
-	RequestQueueDepth        uint64 `json:"request_queue_depth"`
-	RequestQueueCapacity     uint64 `json:"request_queue_capacity"`
-	WorkersActive            uint64 `json:"workers_active"`
-	WorkersCapacity          uint64 `json:"workers_capacity"`
-	RequestsRejectedTotal    uint64 `json:"requests_rejected_total"`
-	ConnectionsRejectedTotal uint64 `json:"connections_rejected_total"`
+	Connections                uint64  `json:"connections"`
+	ConnectionCapacity         uint64  `json:"connection_capacity"`
+	RequestQueueDepth          uint64  `json:"request_queue_depth"`
+	RequestQueueCapacity       uint64  `json:"request_queue_capacity"`
+	WorkersActive              uint64  `json:"workers_active"`
+	WorkersCapacity            uint64  `json:"workers_capacity"`
+	RequestsRejectedTotal      uint64  `json:"requests_rejected_total"`
+	ConnectionsRejectedTotal   uint64  `json:"connections_rejected_total"`
+	RequestsStartedTotal       *uint64 `json:"requests_started_total,omitempty"`
+	RequestQueueWaitDurationNS *uint64 `json:"request_queue_wait_duration_ns_total,omitempty"`
 }
 
 type gatewayStats struct {

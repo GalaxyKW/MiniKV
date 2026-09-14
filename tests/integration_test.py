@@ -177,8 +177,16 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(stats["engine"]["durable_sequence"], 1)
         self.assertEqual(stats["engine"]["wal_pending_bytes"], 0)
         self.assertGreaterEqual(stats["engine"]["wal_commits_total"], 1)
+        self.assertEqual(stats["engine"]["wal_capacity_waiters"], 0)
+        self.assertEqual(stats["engine"]["wal_capacity_waits_total"], 0)
+        self.assertEqual(stats["engine"]["wal_capacity_wait_duration_ns_total"], 0)
+        self.assertEqual(stats["engine"]["wal_durable_waiters"], 0)
+        self.assertEqual(stats["engine"]["wal_durable_waits_total"], 1)
+        self.assertGreater(stats["engine"]["wal_durable_wait_duration_ns_total"], 0)
         self.assertFalse(stats["engine"]["io_failed"])
         self.assertEqual(stats["server"]["workers_capacity"], 2)
+        self.assertEqual(stats["server"]["requests_started_total"], 2)
+        self.assertIsInstance(stats["server"]["request_queue_wait_duration_ns_total"], int)
         self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 2)
         self.assertEqual(stats["gateway"]["rpc"]["errors_total"], 0)
         self.assertEqual(stats["gateway"]["rpc"]["pool_capacity"], 16)
@@ -208,6 +216,11 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(recovered["engine"]["keys"], 1)
         self.assertEqual(recovered["engine"]["durable_sequence"], 1)
         self.assertEqual(recovered["engine"]["wal_commits_total"], 0)
+        for field in ("wal_capacity_waiters", "wal_capacity_waits_total", "wal_capacity_wait_duration_ns_total",
+                      "wal_durable_waiters", "wal_durable_waits_total", "wal_durable_wait_duration_ns_total"):
+            self.assertEqual(recovered["engine"][field], 0)
+        self.assertEqual(recovered["server"]["requests_started_total"], 0)
+        self.assertEqual(recovered["server"]["request_queue_wait_duration_ns_total"], 0)
         self.assertEqual(recovered["gateway"]["rpc"]["calls_total"], 2)
 
     def test_stats_progress_while_data_workers_and_rpc_pool_wait(self):
@@ -239,7 +252,13 @@ class MiniKVIntegration(unittest.TestCase):
                 time.sleep(0.005)
             self.assertEqual(stats["engine"]["durable_sequence"], 0)
             self.assertGreater(stats["engine"]["wal_pending_bytes"], 0)
+            self.assertEqual(stats["engine"]["wal_durable_waiters"], 1)
+            self.assertEqual(stats["engine"]["wal_durable_waits_total"], 0)
+            self.assertEqual(stats["engine"]["wal_durable_wait_duration_ns_total"], 0)
+            self.assertEqual(stats["engine"]["wal_capacity_waiters"], 0)
             self.assertEqual(stats["server"]["workers_active"], 1)
+            self.assertEqual(stats["server"]["requests_started_total"], 1)
+            first_queue_wait = stats["server"]["request_queue_wait_duration_ns_total"]
             self.assertEqual(stats["gateway"]["rpc"]["pool_in_use"], 1)
             with self.rpc_socket() as queued, self.rpc_socket() as rejected:
                 queued.sendall(frame(2, b"waiting"))
@@ -255,6 +274,8 @@ class MiniKVIntegration(unittest.TestCase):
                 code, stats = self.runtime_stats()
                 self.assertEqual(code, 200)
                 self.assertGreaterEqual(stats["server"]["requests_rejected_total"], 1)
+                self.assertEqual(stats["server"]["requests_started_total"], 1)
+                self.assertEqual(stats["server"]["request_queue_wait_duration_ns_total"], first_queue_wait)
                 self.assertEqual(stats["engine"]["durable_sequence"], 0)
                 self.assertEqual(results, [], "data write completed before Stats sampled its wait")
                 queued.settimeout(5)
@@ -267,6 +288,11 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(stats["engine"]["durable_sequence"], 1)
         self.assertEqual(stats["engine"]["wal_pending_bytes"], 0)
+        self.assertEqual(stats["engine"]["wal_durable_waiters"], 0)
+        self.assertEqual(stats["engine"]["wal_durable_waits_total"], 1)
+        self.assertGreater(stats["engine"]["wal_durable_wait_duration_ns_total"], 0)
+        self.assertEqual(stats["server"]["requests_started_total"], 2)
+        self.assertGreater(stats["server"]["request_queue_wait_duration_ns_total"], first_queue_wait)
 
     def test_binary_values_snapshot_and_restart(self):
         key = "tenant:1 \n\x00"

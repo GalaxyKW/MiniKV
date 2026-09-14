@@ -54,6 +54,15 @@ struct EngineStats {
     uint64_t wal_inflight_bytes = 0;
     uint64_t wal_queued_records = 0;
     uint64_t wal_queue_capacity_bytes = 0;
+    // Wait totals count completed episodes, including failure/shutdown wakeups.
+    // Durations include CV waiting and state-lock reacquisition; immediate-ready
+    // requests do not count. Capacity applies to writes; durability includes GET.
+    uint64_t wal_capacity_waiters = 0;
+    uint64_t wal_capacity_waits_total = 0;
+    uint64_t wal_capacity_wait_duration_ns_total = 0;
+    uint64_t wal_durable_waiters = 0;
+    uint64_t wal_durable_waits_total = 0;
+    uint64_t wal_durable_wait_duration_ns_total = 0;
     uint64_t wal_commits_total = 0;
     uint64_t wal_commit_failures_total = 0;
     uint64_t wal_commit_duration_ns_total = 0;

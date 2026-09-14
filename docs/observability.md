@@ -15,6 +15,7 @@ curl -sS http://127.0.0.1:8080/stats | python3 -m json.tool
 - `engine.applied_sequence - engine.durable_sequence` 表示内存已应用但尚未确认同步的日志记录数量；包含删除未命中产生的日志。
 - `engine.wal_pending_bytes` 是全部未同步 WAL 字节，**包含正在写盘的批次**。`wal_inflight_bytes` 只表示当前实际提交中的批次，`wal_queued_records` 只计算尚未被取走的记录。
 - `server.request_queue_depth` 接近容量并出现 `requests_rejected_total` 增长，说明数据任务排队已满。`workers_active` 包含正在等待 WAL 的数据请求。
+- `engine.wal_capacity_waiters` 区分因 WAL 字节额度不足而阻塞的写请求；`wal_durable_waiters` 表示正在等待可靠确认的请求。两者可以帮助解释工作线程为何没有空闲。
 - `gateway.rpc.pool_in_use` 包含拨号和执行中的数据 RPC；池满时其他请求等待。`pool_wait_duration_ns_total` 的增量可以帮助识别网关等待。
 - `engine.snapshot_in_progress` 与快照各阶段的耗时增量可以帮助判断尾延迟是否伴随快照发生。它们不是请求延迟直方图。
 
@@ -35,6 +36,10 @@ curl -sS http://127.0.0.1:8080/stats | python3 -m json.tool
 | `wal_inflight_bytes` | 当前 WAL 提交批次的字节数；该次提交成功或失败后归零 |
 | `wal_queued_records` | 仍在待写队列中的记录数量，不包含已取走的批次 |
 | `wal_queue_capacity_bytes` | 配置的未同步 WAL 字节上限 |
+| `wal_capacity_waiters` | 当前因未同步 WAL 容量不足而等待的写请求数 |
+| `wal_capacity_waits_total` / `wal_capacity_wait_duration_ns_total` | 已结束的 WAL 容量等待次数 / 累计耗时，包含失败与关闭唤醒 |
+| `wal_durable_waiters` | 当前等待可靠确认的 GET / PUT / DELETE 请求数 |
+| `wal_durable_waits_total` / `wal_durable_wait_duration_ns_total` | 已结束的可靠确认等待次数 / 累计耗时，包含失败与关闭唤醒 |
 | `wal_commits_total` / `wal_commit_failures_total` | 本进程成功 / 失败的非空 WAL 批次提交次数 |
 | `wal_commit_duration_ns_total` | 所有已结束的 WAL 批次提交耗时之和，包含失败 |
 | `wal_commit_last_duration_ns` | 最近一次已结束的 WAL 提交耗时，可能属于失败尝试 |
@@ -69,9 +74,31 @@ WAL 提交计时从实际写出批次开始，到同步结束或发生错误为�
 | `connections_rejected_total` | 因达到连接数上限而关闭的新连接数量 |
 | `request_queue_depth` / `request_queue_capacity` | 等待执行的数据请求数 / 队列上限 |
 | `workers_active` / `workers_capacity` | 正在执行数据请求的线程数 / 数据工作线程总数 |
+| `requests_started_total` | 已从数据任务队列取出并交给 worker 的请求数 |
+| `request_queue_wait_duration_ns_total` | 上述请求从成功入队到出队的累计耗时 |
 | `requests_rejected_total` | 因数据任务入队失败而返回 BUSY 的请求数量 |
 
 数据任务统计不包含状态查询。引擎为 Stats 提供固定的 **1 个工作线程和 1 个待执行位置**，使数据线程都在等 WAL 时仍可以读取状态。Stats 队列满时也返回 BUSY，但不增加数据任务的拒绝计数。
+
+## 区分三种等待
+
+请求先等待数据 worker，再执行内存与 WAL 操作；写请求可能先等待 WAL 容量，可靠模式的读写还可能等待持久化进度。三类计时边界不同：
+
+| 等待 | 起止位置 | 不包含什么 |
+| --- | --- | --- |
+| 请求排队 | 持队列锁成功入队，到 worker 取出该任务 | 收包、解码、入队前锁竞争、执行和发送响应 |
+| WAL 容量 | 首次发现未同步字节额度不足，到等待条件满足并重新取得状态锁 | 编码记录、内存修改和随后可靠确认 |
+| 可靠确认 | 首次发现目标序列尚未持久化，到等待结束并重新取得状态锁 | 之前的任务排队、WAL 容量等待和响应发送 |
+
+排队中的请求尚未计入 `requests_started_total` 或排队累计耗时。每个已接纳的数据请求出队时都会计数，半包、非法帧与入队拒绝不计入。断连不撤销已接纳的操作，正常停机也会排空它们，因此这些任务仍会计入。
+
+Engine 的两类等待只在初始条件不满足时计数，已经持久化的 GET 不会增加可靠等待次数。等待尚未结束时只增加 `*_waiters`，次数与耗时在结束时一起累加；失败或关闭唤醒也属于已结束等待。实际计时包含线程调度与重新获取锁的时间，不能当作单独的磁盘耗时。
+
+两个未跨重启的样本之间，可用 `Δ wal_durable_wait_duration_ns_total / Δ wal_durable_waits_total` 计算期间结束的可靠等待的平均耗时；容量等待使用同样口径，平均排队时间的分母为 `Δ requests_started_total`。分母为 0 时没有新的已结束观测，应结合当前 waiter 与队列深度判断。窗口开始前进入、窗口内结束的等待会贡献完整耗时。
+
+不同请求的等待会重叠，也可能与 WAL 提交、快照计时重叠；不要把这些累计值相加当成总运行时间，也不能从平均值推导 P99。它们用于定位下一步实验，逐请求尾延迟仍由客户端报告等观测提供。
+
+新增等待字段沿用 `schema_version: 1`。新版网关连接不提供这些字段的旧版引擎时，会省略相应字段；缺失表示不可用，不能当作实测 0。计时沿用现有锁，不新增等待条件，但读取时钟与累计计数仍有开销，性能比较应固定版本。
 
 ## 网关 RPC
 

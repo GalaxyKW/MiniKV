@@ -338,6 +338,12 @@ private:
         field("wal_inflight_bytes", engine.wal_inflight_bytes);
         field("wal_queued_records", engine.wal_queued_records);
         field("wal_queue_capacity_bytes", engine.wal_queue_capacity_bytes);
+        field("wal_capacity_waiters", engine.wal_capacity_waiters);
+        field("wal_capacity_waits_total", engine.wal_capacity_waits_total);
+        field("wal_capacity_wait_duration_ns_total", engine.wal_capacity_wait_duration_ns_total);
+        field("wal_durable_waiters", engine.wal_durable_waiters);
+        field("wal_durable_waits_total", engine.wal_durable_waits_total);
+        field("wal_durable_wait_duration_ns_total", engine.wal_durable_wait_duration_ns_total);
         field("wal_commits_total", engine.wal_commits_total);
         field("wal_commit_failures_total", engine.wal_commit_failures_total);
         field("wal_commit_duration_ns_total", engine.wal_commit_duration_ns_total);
@@ -357,6 +363,8 @@ private:
         field("request_queue_capacity", pool.capacity);
         field("workers_active", pool.active);
         field("workers_capacity", pool.workers);
+        field("requests_started_total", pool.started_total);
+        field("request_queue_wait_duration_ns_total", pool.queue_wait_duration_ns_total);
         field("requests_rejected_total", requests_rejected_.load(std::memory_order_relaxed));
         field("connections_rejected_total", connections_rejected_.load(std::memory_order_relaxed));
         out << "}}";

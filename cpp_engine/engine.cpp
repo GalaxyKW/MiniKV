@@ -38,6 +38,34 @@ struct TimedStage {
     }
 };
 
+// The caller holds the state lock both when this starts and after the condition
+// variable reacquires it. Do not lock again here, including on failure/close.
+struct TimedWait {
+    uint64_t& waiters;
+    uint64_t& completed;
+    uint64_t& duration;
+    StatsClock::time_point start = StatsClock::now();
+
+    TimedWait(uint64_t& waiting, uint64_t& count, uint64_t& elapsed)
+        : waiters(waiting), completed(count), duration(elapsed) { ++waiters; }
+    TimedWait(const TimedWait&) = delete;
+    TimedWait& operator=(const TimedWait&) = delete;
+    ~TimedWait() {
+        --waiters;
+        ++completed;
+        duration += elapsed_ns(start);
+    }
+};
+
+template <class Predicate>
+void wait_with_stats(std::condition_variable& condition, std::unique_lock<std::mutex>& lock,
+                     Predicate ready, uint64_t& waiters, uint64_t& completed, uint64_t& duration) {
+    // Preserve the original predicate and avoid clock reads on the ready path.
+    if (ready()) return;
+    TimedWait timer(waiters, completed, duration);
+    condition.wait(lock, ready);
+}
+
 struct File {
     int fd;
     explicit File(int value) : fd(value) {}
@@ -310,14 +338,20 @@ Response Engine::execute(const Request& request) {
         Response result = it == kv_.end() ? Response{Status::NotFound, {}} : Response{Status::Value, it->second};
         const uint64_t observed = applied_sequence_;
         if (config_.wal_mode == WalMode::Reliable) {
-            committed_.wait(lock, [&] { return stopping_ || !failure_.empty() || durable_sequence_ >= observed; });
+            wait_with_stats(committed_, lock,
+                            [&] { return stopping_ || !failure_.empty() || durable_sequence_ >= observed; },
+                            stats_.wal_durable_waiters, stats_.wal_durable_waits_total,
+                            stats_.wal_durable_wait_duration_ns_total);
             if (!failure_.empty()) return {Status::IOError, failure_};
             if (durable_sequence_ < observed) return {Status::IOError, "shutdown before observed state was durable"};
         }
         return result;
     }
     const size_t size = codec::kRecordHeader + request.key.size() + request.value.size() + 4;
-    committed_.wait(lock, [&] { return stopping_ || !failure_.empty() || pending_bytes_ + size <= config_.wal_queue_bytes; });
+    wait_with_stats(committed_, lock,
+                    [&] { return stopping_ || !failure_.empty() || pending_bytes_ + size <= config_.wal_queue_bytes; },
+                    stats_.wal_capacity_waiters, stats_.wal_capacity_waits_total,
+                    stats_.wal_capacity_wait_duration_ns_total);
     if (!failure_.empty()) return {Status::IOError, failure_};
     if (stopping_) return {Status::Busy, "engine is stopping"};
     if (applied_sequence_ == std::numeric_limits<uint64_t>::max()) return {Status::IOError, "sequence exhausted"};
@@ -336,7 +370,10 @@ Response Engine::execute(const Request& request) {
     }
     wake_.notify_one();
     if (config_.wal_mode == WalMode::Reliable) {
-        committed_.wait(lock, [&] { return stopping_ || !failure_.empty() || durable_sequence_ >= sequence; });
+        wait_with_stats(committed_, lock,
+                        [&] { return stopping_ || !failure_.empty() || durable_sequence_ >= sequence; },
+                        stats_.wal_durable_waiters, stats_.wal_durable_waits_total,
+                        stats_.wal_durable_wait_duration_ns_total);
         if (!failure_.empty()) return {Status::IOError, failure_};
         if (durable_sequence_ < sequence) return {Status::IOError, "shutdown before durable acknowledgement"};
     }

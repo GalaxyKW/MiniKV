@@ -30,7 +30,7 @@ make sanitize-test
 | 快照并发 | 快照文件写盘期间可靠读写继续完成；快照捕获固定版本；自动快照、多个快照串行执行、关闭等待快照、WAL 替换保留后续写入 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 故障边界 | WAL/快照 I/O 故障注入、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | HTTP 与 RPC | 参数与状态码映射、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
-| 运行状态 | WAL 队列与写盘批次区分、提交和快照失败计数、重启归零、RPC 等待与重试统计；状态查询不泄漏用户数据 | [stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
+| 运行状态 | WAL 队列与写盘批次区分、容量与可靠确认等待、任务排队计时、失败唤醒与重启归零；RPC 等待与重试、旧引擎缺字段的透传语义 | [engine_test.cpp](../tests/engine_test.cpp)、[stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
 | 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理；并发聚合中成功、失败、未命中与网络错误的计数守恒 | [main_test.go](../benmark/main_test.go) |
 | 可复现实验 | 参数边界与无副作用解析、跨 worker 请求集合、低分配生成、精确分位数与大均值、JSON 输出与失败分类 | [config_test.go](../benmark/config_test.go)、[workload_test.go](../benmark/workload_test.go)、[report_test.go](../benmark/report_test.go) |
 | 实验管理 | 新目录不覆盖、完整矩阵与失败产物、超时和信号下回收子进程、隔离继承环境、资源缺失与 PID 复用 | [experiment_test.py](../tests/experiment_test.py)、[experiment_support_test.py](../tests/experiment_support_test.py) |

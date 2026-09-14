@@ -2,6 +2,7 @@
 #include "codec.h"
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +11,7 @@
 #include <stdexcept>
 #include <sys/resource.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -157,6 +159,22 @@ struct WalSyncGate {
     void release() { resume.set_value(); }
 };
 
+template <class Predicate> bool wait_for_stats(Engine& engine, Predicate ready) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+        if (ready(engine.stats())) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return ready(engine.stats());
+}
+
+void require_no_waits(const EngineStats& stats) {
+    require(stats.wal_capacity_waiters == 0 && stats.wal_capacity_waits_total == 0 &&
+            stats.wal_capacity_wait_duration_ns_total == 0 && stats.wal_durable_waiters == 0 &&
+            stats.wal_durable_waits_total == 0 && stats.wal_durable_wait_duration_ns_total == 0,
+            "ready requests or recovery were counted as WAL waits");
+}
+
 void wal_io_allows_throughput_progress() {
     TempDir dir;
     auto config = config_for(dir);
@@ -182,6 +200,7 @@ void wal_io_allows_throughput_progress() {
         require(syncing && snapshot_waited, "snapshot did not serialize with in-flight WAL");
         require(wrote && read, "WAL I/O blocked throughput requests");
         require(value.status == Status::Value && value.value == "one", "concurrent read changed data");
+        require_no_waits(engine.stats());
         put(engine, "after", "checkpoint");
         engine.close();
     }
@@ -192,31 +211,60 @@ void wal_io_allows_throughput_progress() {
 }
 
 void in_flight_wal_counts_toward_queue_limit() {
-    TempDir dir;
-    auto config = config_for(dir);
-    config.wal_mode = WalMode::Throughput;
-    config.wal_batch_size = 1;
-    config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
-    WalSyncGate gate;
-    config.io_hook = [&](const std::string& point) { gate(point); };
-    Engine engine(config);
-    const std::string key(kMaxKeySize, 'k');
-    put(engine, key, std::string(kMaxValueSize, 'v'));
-    const bool syncing = gate.wait();
-    auto writer = std::async(std::launch::async, [&] { put(engine, "next", "value"); });
-    auto reader = std::async(std::launch::async, [&] { return get(engine, key); });
-    const bool bounded = writer.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout;
-    const bool read = reader.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
-    gate.release();
-    writer.get();
-    const auto value = reader.get();
-    require(syncing && bounded, "in-flight WAL stopped counting toward the queue byte limit");
-    require(read && value.status == Status::Value && value.value.size() == kMaxValueSize,
-            "WAL backpressure unnecessarily blocked reads");
-    engine.close();
-    config.io_hook = {};
-    Engine recovered(config);
-    require(get(recovered, "next").value == "value", "backpressured write was lost");
+    for (bool fail : {false, true}) {
+        TempDir dir;
+        auto config = config_for(dir);
+        config.wal_mode = WalMode::Throughput;
+        config.wal_batch_size = 1;
+        config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+        WalSyncGate gate;
+        gate.fail = fail;
+        config.io_hook = [&](const std::string& point) { gate(point); };
+        Engine engine(config);
+        const std::string key(kMaxKeySize, 'k');
+        put(engine, key, std::string(kMaxValueSize, 'v'));
+        const bool syncing = gate.wait();
+        auto writer = std::async(std::launch::async, [&] { return engine.execute({Operation::Put, "next", "value"}); });
+        auto reader = std::async(std::launch::async, [&] { return get(engine, key); });
+        const bool counted_waiter = wait_for_stats(engine, [](const EngineStats& stats) {
+            return stats.wal_capacity_waiters == 1;
+        });
+        const auto during = engine.stats();
+        const bool bounded = writer.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+        const bool read = reader.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
+        gate.release();
+        const auto written = writer.get();
+        const auto value = reader.get();
+        const auto after = engine.stats();
+        require(syncing && bounded, "in-flight WAL stopped counting toward the queue byte limit");
+        require(read && value.status == Status::Value && value.value.size() == kMaxValueSize,
+                "WAL backpressure unnecessarily blocked reads");
+        require(counted_waiter && during.wal_capacity_waits_total == 0 &&
+                during.wal_capacity_wait_duration_ns_total == 0,
+                "active capacity wait was omitted or counted before it finished");
+        require(after.wal_capacity_waiters == 0 && after.wal_capacity_waits_total == 1 &&
+                after.wal_capacity_wait_duration_ns_total > 0,
+                "capacity wait completion or duration was lost");
+        require(after.wal_durable_waiters == 0 && after.wal_durable_waits_total == 0 &&
+                after.wal_durable_wait_duration_ns_total == 0,
+                "throughput request was counted as a durable wait");
+        if (fail) {
+            require(written.status == Status::IOError, "capacity waiter missed WAL failure");
+            require(engine.execute({Operation::Delete, "later", {}}).status == Status::IOError &&
+                    engine.stats().wal_capacity_waits_total == 1, "rejected request added a capacity wait");
+            must_fail([&] { engine.close(); }, "close hid capacity waiter WAL failure");
+        } else {
+            require(written.status == Status::Ok, "backpressured write failed after capacity became available");
+            // Small writes fit immediately even if their previous batch is still in flight.
+            require(engine.execute({Operation::Delete, "absent", {}}).status == Status::NotFound &&
+                    engine.stats().wal_capacity_waits_total == 1, "ready write added a capacity wait");
+            engine.close();
+            config.io_hook = {};
+            Engine recovered(config);
+            require(get(recovered, "next").value == "value", "backpressured write was lost");
+            require_no_waits(recovered.stats());
+        }
+    }
 }
 
 void in_flight_wal_preserves_reliable_acknowledgements() {
@@ -234,23 +282,35 @@ void in_flight_wal_preserves_reliable_acknowledgements() {
             else if (batch == 1) following_gate(point);
         };
         Engine engine(config);
+        require(get(engine, "absent").status == Status::NotFound, "empty reliable read failed");
+        require_no_waits(engine.stats());
         auto first = std::async(std::launch::async, [&] { return engine.execute({Operation::Put, "first", "one"}); });
         const bool syncing = gate.wait();
         auto second = std::async(std::launch::async, [&] { return engine.execute({Operation::Put, "second", "two"}); });
         auto reader = std::async(std::launch::async, [&] { return get(engine, "first"); });
         auto sequence = std::async(std::launch::async, [&] { return engine.durable_sequence(); });
+        const bool counted_waiters = wait_for_stats(engine, [](const EngineStats& stats) {
+            return stats.wal_durable_waiters == 3;
+        });
+        const auto during = engine.stats();
         const bool first_waited = first.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
         const bool second_waited = second.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
         const bool read_waited = reader.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
         const bool state_available = sequence.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
         gate.release();
         bool first_batch_only = true;
+        bool counted_dependent_read = true;
         if (!fail) {
             // Keep batch 2 unsynced after batch 1 commits: its acknowledgement
             // must not be released by advancing to the latest applied sequence.
             const bool following_syncing = following_gate.wait();
             auto committed = std::async(std::launch::async, [&] { return engine.durable_sequence(); });
             auto dependent_read = std::async(std::launch::async, [&] { return get(engine, "second"); });
+            counted_dependent_read = wait_for_stats(engine, [](const EngineStats& stats) {
+                // The first reader may have observed sequence 1 or 2. Either
+                // way, exactly four requests must have entered durable waits.
+                return stats.wal_durable_waiters + stats.wal_durable_waits_total == 4;
+            });
             const bool first_done = first.wait_for(std::chrono::milliseconds(300)) == std::future_status::ready;
             const bool second_pending = second.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
             const bool read_pending = dependent_read.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
@@ -263,26 +323,45 @@ void in_flight_wal_preserves_reliable_acknowledgements() {
         }
         const auto first_result = first.get(), second_result = second.get(), read_result = reader.get();
         const auto before_sync = sequence.get();
+        const auto after = engine.stats();
         require(syncing && state_available && before_sync == 0, "in-flight I/O locked state or advanced the commit point");
         require(first_waited && second_waited && read_waited, "reliable request returned before sync");
         require(first_batch_only, "one WAL batch acknowledged a later, unsynced operation");
+        require(counted_waiters && during.wal_durable_waits_total == 0 &&
+                during.wal_durable_wait_duration_ns_total == 0,
+                "active reliable waits were omitted or counted before completion");
+        require(counted_dependent_read && after.wal_durable_waiters == 0 &&
+                after.wal_durable_waits_total == (fail ? 3U : 4U) && after.wal_durable_wait_duration_ns_total > 0,
+                "reliable wait completion or duration was lost");
+        require(after.wal_capacity_waiters == 0 && after.wal_capacity_waits_total == 0 &&
+                after.wal_capacity_wait_duration_ns_total == 0, "writes with free WAL capacity were counted as waiting");
         if (fail) {
             require(first_result.status == Status::IOError && second_result.status == Status::IOError &&
                     read_result.status == Status::IOError && engine.durable_sequence() == 0,
                     "failed in-flight batch was acknowledged");
             require(engine.execute({Operation::Put, "later", "value"}).status == Status::IOError,
                     "writes continued after in-flight WAL failure");
+            require(engine.stats().wal_durable_waits_total == after.wal_durable_waits_total &&
+                    engine.stats().wal_durable_wait_duration_ns_total == after.wal_durable_wait_duration_ns_total,
+                    "rejected write added a durable wait");
             must_fail([&] { engine.snapshot(); }, "snapshot bypassed in-flight WAL failure");
             must_fail([&] { engine.close(); }, "close hid in-flight WAL failure");
         } else {
             require(first_result.status == Status::Ok && second_result.status == Status::Ok &&
                     read_result.status == Status::Value && read_result.value == "one" && engine.durable_sequence() == 2,
                     "successful batches did not acknowledge in sequence");
+            require(get(engine, "first").value == "one" && get(engine, "absent").status == Status::NotFound,
+                    "already durable reads failed");
+            const auto ready_reads = engine.stats();
+            require(ready_reads.wal_durable_waits_total == after.wal_durable_waits_total &&
+                    ready_reads.wal_durable_wait_duration_ns_total == after.wal_durable_wait_duration_ns_total,
+                    "already durable reads added waits");
             engine.close();
             config.io_hook = {};
             Engine recovered(config);
             require(get(recovered, "first").value == "one" && get(recovered, "second").value == "two",
                     "reliable in-flight writes did not recover");
+            require_no_waits(recovered.stats());
         }
     }
 }
@@ -309,6 +388,55 @@ void close_drains_in_flight_and_queued_wal() {
     Engine recovered(config);
     require(get(recovered, "first").value == "one" && get(recovered, "queued").value == "two",
             "close lost in-flight or queued WAL records");
+}
+
+void close_completes_request_waits() {
+    TempDir dir;
+    auto config = config_for(dir);
+    config.wal_batch_size = 1;
+    config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+    WalSyncGate gate;
+    config.io_hook = [&](const std::string& point) { gate(point); };
+    Engine engine(config);
+    const std::string key(kMaxKeySize, 'k');
+    auto writer = std::async(std::launch::async, [&] {
+        return engine.execute({Operation::Put, key, std::string(kMaxValueSize, 'v')});
+    });
+    const bool syncing = gate.wait();
+    auto deleter = std::async(std::launch::async, [&] { return engine.execute({Operation::Delete, key, {}}); });
+    auto reader = std::async(std::launch::async, [&] { return get(engine, key); });
+    const bool waiting = wait_for_stats(engine, [](const EngineStats& stats) {
+        return stats.wal_capacity_waiters == 1 && stats.wal_durable_waiters == 2;
+    });
+    auto closer = std::async(std::launch::async, [&] { engine.close(); });
+    // close() wakes requests before joining the deliberately stalled WAL writer.
+    // Capture accounting before releasing sync, so success cannot hide a missing
+    // shutdown wakeup or an acknowledgement of data that is not yet durable.
+    const bool woken = wait_for_stats(engine, [](const EngineStats& stats) {
+        return stats.stopping && stats.wal_capacity_waiters == 0 && stats.wal_durable_waiters == 0;
+    });
+    const auto stopped = engine.stats();
+    const bool close_waited = closer.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+    gate.release();
+    const auto written = writer.get(), deleted = deleter.get(), read = reader.get();
+    closer.get();
+    require(syncing && waiting && woken && close_waited, "close did not wake requests while draining WAL");
+    require(stopped.durable_sequence == 0 && stopped.wal_capacity_waits_total == 1 &&
+            stopped.wal_durable_waits_total == 2 && stopped.wal_capacity_wait_duration_ns_total > 0 &&
+            stopped.wal_durable_wait_duration_ns_total > 0, "shutdown lost request wait accounting");
+    require(written.status == Status::IOError && read.status == Status::IOError && deleted.status == Status::Busy,
+            "shutdown changed durable or capacity wait responses");
+    const auto drained = engine.stats();
+    require(drained.applied_sequence == 1 && drained.durable_sequence == 1 &&
+            drained.wal_capacity_waits_total == stopped.wal_capacity_waits_total &&
+            drained.wal_durable_waits_total == stopped.wal_durable_waits_total &&
+            drained.wal_capacity_wait_duration_ns_total == stopped.wal_capacity_wait_duration_ns_total &&
+            drained.wal_durable_wait_duration_ns_total == stopped.wal_durable_wait_duration_ns_total,
+            "shutdown flush recounted completed waits or admitted a blocked delete");
+    config.io_hook = {};
+    Engine recovered(config);
+    require(get(recovered, key).value.size() == kMaxValueSize, "shutdown did not preserve the admitted write");
+    require_no_waits(recovered.stats());
 }
 
 void wal_failures() {
@@ -534,6 +662,7 @@ int main(int argc, char** argv) {
             {"in-flight WAL queue limit", in_flight_wal_counts_toward_queue_limit},
             {"in-flight WAL acknowledgements", in_flight_wal_preserves_reliable_acknowledgements},
             {"in-flight WAL close", close_drains_in_flight_and_queued_wal},
+            {"shutdown request waits", close_completes_request_waits},
         };
         size_t executed = 0;
         for (const auto& test : tests) {
