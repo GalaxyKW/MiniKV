@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "description": "All four runs of the predeclared large-dataset snapshot pilot, before buffered snapshot output: frozen d2d5eb8 Engine with fixed 7d29382 Gateway and Benchmark; 20000 then 100000 keys, snapshot off then 5000ms on, one run per condition, 1500000 measured requests and 1024-byte values. Retains the complete parent plan, two host-before records and both stage artifacts. Only actual binary copies and generated data are omitted. Every run satisfied the declared duration and internal snapshot-completion coverage. A single OFF/ON pair per dataset does not establish causal snapshot cost or the performance of subsequent buffer changes.",
+  "archives": [
+    {
+      "name": "d2-size-pilot",
+      "file": "d2-size-pilot.tar.gz",
+      "sha256": "32c86433e8ce37029d943a5723a76b00f0faf66514f2b18815d86b12670f2a78",
+      "size_bytes": 342022,
+      "raw_bytes": 4477658,
+      "files": 53,
+      "stages": 2,
+      "runs": 4,
+      "engine_runtime_revision": "d2d5eb862ee1cf11fcbeb68c04c66d740613338e",
+      "gateway_and_benchmark_revision": "7d293825a6bc6963ef9856b63cd08f932ee91f76",
+      "binary_sha256": {
+        "engine": "efabc96b11ae376fa020b052215f57af286729d7c5b76722b9ddaba6d9f022a0",
+        "gateway": "6fed313c6f924c21871cc05cf5589a5a6189cde1663492d682ec5b5ea3981882",
+        "bench": "2ef55eb18244b0e0e8b4b9d94318300c6090b59dda7423df529ac370f6bca4fc"
+      },
+      "plan_sha256": "a4872fc41fc49bb16f20f0c9a3d23e07a0d837d0d27862f033960a4f9c43c3cb",
+      "coverage_criteria": {
+        "measurement_min_seconds": 30,
+        "on_min_internal_completed_snapshots": 3
+      }
+    }
+  ]
+}
