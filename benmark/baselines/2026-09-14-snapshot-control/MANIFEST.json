@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "description": "All 16 runs of the predeclared 100k-key, 1KiB-value snapshot output comparison: A is frozen d2d5eb8 Engine and B is frozen bfeddf1 buffered Engine; both use identical frozen 7d29382 Gateway and Benchmark. ABBABAAB stages each run snapshot OFF then 5000ms ON once with 1500000 measured requests. Keeps the complete parent plan, eight host-before records and all eight stage artifacts; only actual binaries and generated data are omitted. Every run met the declared coverage. Snapshot write-stage B/A ratios were lower in all four ON pairs, while end-to-end results were worse in three pairs; all slow runs including 03-B ON max 266.577726 ms are retained. These observations do not prove overall improvement or identify the cause of the regressions.",
+  "archives": [
+    {
+      "name": "snapshot-d2-bfed",
+      "file": "snapshot-d2-bfed.tar.gz",
+      "sha256": "fe127a8179023a80b56835a034c721c0002c60707d6dca7276a9e7bbd4ccd89b",
+      "size_bytes": 1565422,
+      "raw_bytes": 20722356,
+      "files": 209,
+      "stages": 8,
+      "runs": 16,
+      "stage_order": "ABBABAAB",
+      "adjacent_pairs": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          7,
+          8
+        ]
+      ],
+      "engine_runtime_revisions": {
+        "A": "d2d5eb862ee1cf11fcbeb68c04c66d740613338e",
+        "B": "bfeddf139aab09442207e9938617bff63725ccd1"
+      },
+      "engine_sha256": {
+        "A": "efabc96b11ae376fa020b052215f57af286729d7c5b76722b9ddaba6d9f022a0",
+        "B": "7ebe0839e69478d7ed78ec997aa178b61e07294fafb168371cc6555024940dc0"
+      },
+      "common_binary_sha256": {
+        "gateway": "6fed313c6f924c21871cc05cf5589a5a6189cde1663492d682ec5b5ea3981882",
+        "bench": "2ef55eb18244b0e0e8b4b9d94318300c6090b59dda7423df529ac370f6bca4fc"
+      },
+      "plan_sha256": "a74465c47cedc4d90ac27355df76cf91c10b73654d4204d12ac8eec8e061bace",
+      "primary_observation": "ON per-run snapshot write duration increment divided by complete snapshot count within common idle endpoints; derive adjacent paired B/A ratios only for adequate windows.",
+      "coverage_criteria": {
+        "measurement_min_seconds": 30,
+        "on_min_internal_completed_snapshots": 3,
+        "phase_means_require_shared_idle_endpoints": true,
+        "phase_means_require_no_failures": true,
+        "on_min_shared_idle_window_completed_snapshots": 3,
+        "idle_window_selection": "earliest and latest internal samples that are both snapshot_in_progress=false; no endpoint selection based on measured cost",
+        "coverage_failure_policy": "continue the predeclared remaining sequence; preserve raw client results and mark affected phase metrics unavailable/coverage_insufficient. Stop only on experiment failure/interruption."
+      }
+    }
+  ]
+}
