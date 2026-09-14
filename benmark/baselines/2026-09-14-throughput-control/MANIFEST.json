@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "All 18 throughput-mode runs, 500000 measured requests each: frozen 25cec55 reference, frozen 7d29382, then the predeclared return to the original 25cec55 binaries. Each matrix includes snapshot off/on with three repetitions. Actual executable copies and generated data are omitted; every other raw file is retained. Original paths and driver Git metadata are provenance, not runtime version. These records predate subsequent throughput-path optimizations; observed variation does not establish its cause.",
+  "archives": [
+    {
+      "name": "sync25-reference",
+      "file": "sync25-reference.tar.gz",
+      "runtime_revision": "25cec555f70e338baaf8dad1eec579589f79bf5f",
+      "sha256": "0de3cde3e433df59157e36615863b4ea7e19e010720ef759be3db5849f0e0f3b",
+      "size_bytes": 161126,
+      "raw_bytes": 1803456,
+      "files": 69,
+      "runs": 6
+    },
+    {
+      "name": "async7d",
+      "file": "async7d.tar.gz",
+      "runtime_revision": "7d293825a6bc6963ef9856b63cd08f932ee91f76",
+      "sha256": "bd743f5176cd0a735a3e52d1a8ed1720da847fcc9db3ca68c606fc3f0b740dc1",
+      "size_bytes": 174195,
+      "raw_bytes": 1999507,
+      "files": 69,
+      "runs": 6
+    },
+    {
+      "name": "sync25-return",
+      "file": "sync25-return.tar.gz",
+      "runtime_revision": "25cec555f70e338baaf8dad1eec579589f79bf5f",
+      "sha256": "e21281dbe69292a958019a5671ab412dd2b4cbab7a601a77dc62f0b2e35dc1fc",
+      "size_bytes": 163769,
+      "raw_bytes": 1822104,
+      "files": 69,
+      "runs": 6
+    }
+  ]
+}
