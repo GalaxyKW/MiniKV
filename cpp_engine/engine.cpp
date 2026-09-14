@@ -183,7 +183,8 @@ Engine::Engine(EngineConfig config) : config_(std::move(config)) {
         if (::flock(lock_fd_, LOCK_EX | LOCK_NB) != 0) io_error("data directory is already in use");
         recover();
         worker_ = std::thread(&Engine::background_work, this);
-        reply_worker_ = std::thread(&Engine::background_replies, this);
+        // Throughput requests never register deferred durable replies.
+        if (config_.wal_mode == WalMode::Reliable) reply_worker_ = std::thread(&Engine::background_replies, this);
         if (config_.snapshot_interval.count() > 0) snapshot_worker_ = std::thread(&Engine::background_snapshots, this);
     } catch (...) {
         // A later thread can fail to start after another worker was created.

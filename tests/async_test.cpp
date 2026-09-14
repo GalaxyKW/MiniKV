@@ -166,6 +166,81 @@ void immediate_responses_and_validation() {
     require_reset(throughput.stats());
 }
 
+void throughput_drain_does_not_wait_for_wal() {
+    TempDir dir;
+    auto config = config_for(dir);
+    config.wal_mode = WalMode::Throughput;
+    Gate first_sync;
+    std::atomic<bool> paused{false};
+    config.io_hook = [&](const std::string& point) {
+        if (point == "wal.sync" && !paused.exchange(true)) first_sync.pause();
+    };
+    Engine engine(config);
+    Reply unused;
+    const auto first = engine.execute({Operation::Put, "first", "one"});
+    const bool syncing = first_sync.wait();
+    auto writing = std::async(std::launch::async, [&] {
+        return engine.execute({Operation::Put, "second", "two"});
+    });
+    auto submitting = std::async(std::launch::async, [&] {
+        return engine.execute_async({Operation::Put, "third", "three"}, unused.callback());
+    });
+    auto reading = std::async(std::launch::async, [&] {
+        return engine.execute_async({Operation::Get, "first", {}}, unused.callback());
+    });
+    const bool written = writing.wait_for(300ms) == std::future_status::ready;
+    const bool submitted = submitting.wait_for(300ms) == std::future_status::ready;
+    const bool read = reading.wait_for(300ms) == std::future_status::ready;
+    if (!syncing || !written || !submitted || !read) first_sync.release();
+    require(syncing && written && submitted && read, "throughput request waited for paused WAL durability");
+    const auto second = writing.get();
+    const auto third = submitting.get();
+    const auto visible = reading.get();
+    const auto before_drain = engine.stats();
+    // All submitting calls have returned: drain only waits for transferred
+    // callbacks, and must leave this throughput WAL batch untouched.
+    auto draining = std::async(std::launch::async, [&] { engine.drain_async(); });
+    const bool drained = draining.wait_for(300ms) == std::future_status::ready;
+    if (!drained) first_sync.release();
+    require(drained, "throughput drain waited for paused WAL durability");
+    draining.get();
+    const auto after_drain = engine.stats();
+    auto closing = std::async(std::launch::async, [&] { engine.close(); });
+    const bool close_started = await_stats(engine, [](const EngineStats& stats) { return stats.stopping; });
+    const bool close_waited = closing.wait_for(50ms) == std::future_status::timeout;
+    first_sync.release();
+    closing.get();
+    require(first.status == Status::Ok && second.status == Status::Ok &&
+            third && third->status == Status::Ok && visible && visible->status == Status::Value &&
+            visible->value == "one" && unused.count() == 0,
+            "throughput immediate response transferred a callback or lost visible state");
+    require(before_drain.applied_sequence == 3 && before_drain.durable_sequence == 0 &&
+            before_drain.wal_pending_bytes > 0 && before_drain.wal_inflight_bytes > 0 &&
+            after_drain.applied_sequence == 3 && after_drain.durable_sequence == 0 &&
+            after_drain.wal_pending_bytes == before_drain.wal_pending_bytes &&
+            after_drain.wal_inflight_bytes == before_drain.wal_inflight_bytes && !after_drain.stopping,
+            "throughput drain flushed WAL or stopped the engine");
+    require_reset(before_drain);
+    require_reset(after_drain);
+    const auto closed = engine.stats();
+    require(close_started && close_waited && closed.applied_sequence == 3 && closed.durable_sequence == 3 &&
+            closed.wal_pending_bytes == 0 && closed.wal_inflight_bytes == 0 &&
+            closed.stopping && !closed.io_failed,
+            "throughput close did not wait for and flush its remaining WAL");
+    engine.close();
+    engine.drain_async();
+    engine.drain_async();
+    require_reset(engine.stats());
+    config.io_hook = {};
+    Engine recovered(config);
+    require(recovered.execute({Operation::Get, "first", {}}).value == "one" &&
+            recovered.execute({Operation::Get, "second", {}}).value == "two" &&
+            recovered.execute({Operation::Get, "third", {}}).value == "three" &&
+            recovered.stats().durable_sequence == 3,
+            "throughput close did not preserve all immediate responses across recovery");
+    require_reset(recovered.stats());
+}
+
 void batches_and_captured_reads() {
     TempDir dir;
     auto config = config_for(dir);
@@ -679,6 +754,7 @@ int main(int argc, char** argv) {
     try {
         const std::vector<std::pair<const char*, void(*)()>> tests = {
             {"immediate responses", immediate_responses_and_validation},
+            {"throughput drain and close", throughput_drain_does_not_wait_for_wal},
             {"batches and captured reads", batches_and_captured_reads},
             {"callback resource lifetime", slots_cover_callback_resources},
             {"WAL failures", wal_failures_complete_callbacks},

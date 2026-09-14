@@ -107,7 +107,7 @@ WAL 队列额度包含正在写盘但尚未同步的批次，容量不足时写�
 | --- | --- | --- |
 | `MINIKV_ENGINE_HOST` | `127.0.0.1` | IPv4 监听地址，不能使用主机名 |
 | `MINIKV_ENGINE_PORT` | `9090` | TCP 监听端口；1–65535 |
-| `MINIKV_WORKERS` | `20` | 执行完整数据请求的线程数；1–1024 |
+| `MINIKV_WORKERS` | `20` | 执行数据操作的 worker 数，不含 WAL、快照、可靠完成和 Stats 线程；1–1024 |
 | `MINIKV_REQUEST_QUEUE_SIZE` | `128` | 等待执行的请求上限，不含正在执行的任务；1–65536 |
 | `MINIKV_MAX_CONNECTIONS` | `256` | 引擎连接总数上限；1–65536 |
 | `MINIKV_CLIENT_IDLE_MS` | `30000` | 连接无进展超时，毫秒；1–3600000 |

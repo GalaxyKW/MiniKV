@@ -170,6 +170,7 @@ class Server {
 public:
     Server(Engine& engine, size_t workers, size_t queue_capacity)
         : engine_(engine),
+          asynchronous_replies_(engine.stats().wal_mode == WalMode::Reliable),
           pool_(workers, queue_capacity),
           sink_(std::make_shared<CompletionSink>(workers + queue_capacity)),
           max_connections_(env_int("MINIKV_MAX_CONNECTIONS", 256, 1, 65536)),
@@ -380,6 +381,8 @@ private:
                     try {
                         if (request.operation == Operation::Stats) {
                             deliver({Status::Value, stats_json()});
+                        } else if (!asynchronous_replies_) {
+                            deliver(engine_.execute(request));
                         } else {
                             // An immediate result never invokes the callback;
                             // nullopt transfers exactly one completion to Engine.
@@ -554,6 +557,7 @@ private:
     }
 
     Engine& engine_;
+    const bool asynchronous_replies_;
     ThreadPool pool_;
     // Control queries have their own workers and two whole-request permits.
     ThreadPool stats_pool_{1, 1};
