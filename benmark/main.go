@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -201,7 +200,7 @@ func classifyResult(op string, status int, body string) (success, miss bool) {
 
 func runBenchmark(cfg benchConfig) (benchResult, error) {
 	result := benchResult{
-		latencies:   make([]time.Duration, 0, cfg.requests),
+		latencies:   make([]time.Duration, cfg.requests),
 		statusCount: make(map[int]int64),
 		total:       cfg.requests,
 	}
@@ -213,18 +212,14 @@ func runBenchmark(cfg benchConfig) (benchResult, error) {
 	}
 
 	jobs := make(chan int)
-	latCh := make(chan time.Duration, cfg.requests)
-	statusCh := make(chan int, cfg.requests)
-	var errorCount int64
-	var successCount int64
-	var failureCount int64
-	var logicalMissCount int64
+	workerResults := make([]benchResult, cfg.workers)
 
 	var wg sync.WaitGroup
 	for w := 0; w < cfg.workers; w++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
+			local := benchResult{statusCount: make(map[int]int64)}
 			r := rand.New(rand.NewSource(cfg.seed + int64(workerID)))
 			for i := range jobs {
 				op := cfg.op
@@ -233,7 +228,10 @@ func runBenchmark(cfg benchConfig) (benchResult, error) {
 				}
 
 				key := fmt.Sprintf("k%d", r.Intn(cfg.keyspace))
-				value := makeValue(fmt.Sprintf("v%d-%d", workerID, i), cfg.valueSize)
+				value := ""
+				if op == "put" {
+					value = makeValue(fmt.Sprintf("v%d-%d", workerID, i), cfg.valueSize)
+				}
 
 				start := time.Now()
 				status := 0
@@ -249,27 +247,29 @@ func runBenchmark(cfg benchConfig) (benchResult, error) {
 				default:
 					err = fmt.Errorf("不支持的操作类型: %s", op)
 				}
-				latCh <- time.Since(start)
+				// Each job owns a distinct slot; the slice is read only after wg.Wait.
+				result.latencies[i] = time.Since(start)
 
 				if err != nil {
-					atomic.AddInt64(&errorCount, 1)
-					atomic.AddInt64(&failureCount, 1)
+					local.errors++
+					local.failures++
 					continue
 				}
 
-				statusCh <- status
+				local.statusCount[status]++
 				success, miss := classifyResult(op, status, body)
 				if miss {
-					atomic.AddInt64(&logicalMissCount, 1)
+					local.logicalMisses++
 					continue
 				}
 
 				if success {
-					atomic.AddInt64(&successCount, 1)
+					local.successes++
 				} else {
-					atomic.AddInt64(&failureCount, 1)
+					local.failures++
 				}
 			}
+			workerResults[workerID] = local
 		}(w)
 	}
 
@@ -280,19 +280,15 @@ func runBenchmark(cfg benchConfig) (benchResult, error) {
 	close(jobs)
 	wg.Wait()
 	result.elapsed = time.Since(start)
-	close(latCh)
-	close(statusCh)
-
-	for d := range latCh {
-		result.latencies = append(result.latencies, d)
+	for _, local := range workerResults {
+		result.errors += local.errors
+		result.successes += local.successes
+		result.failures += local.failures
+		result.logicalMisses += local.logicalMisses
+		for status, count := range local.statusCount {
+			result.statusCount[status] += count
+		}
 	}
-	for s := range statusCh {
-		result.statusCount[s]++
-	}
-	result.errors = errorCount
-	result.successes = successCount
-	result.failures = failureCount
-	result.logicalMisses = logicalMissCount
 	return result, nil
 }
 
