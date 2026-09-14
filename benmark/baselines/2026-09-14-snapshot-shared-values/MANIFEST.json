@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "description": "Isolated shared-immutable-value prototype characterization, not adopted. Complete frozen outer/scenario plans and execution record preserve all 24 planned cases, including cutoff/not_executed/partial states. Both Engines retain buffer and seven metrics; only value representation differs. All source raw artifacts are retained except binaries/data; derived checks and source patch are separate.",
+  "archives": [
+    {
+      "name": "snapshot-shared-values",
+      "file": "snapshot-shared-values.tar.gz",
+      "sha256": "1c9779361478da1ddb25588501d1a7d5bc7a9a9214a118ff45d0d976627c777b",
+      "size_bytes": 1675471,
+      "raw_bytes": 22814455,
+      "files": 264,
+      "planned_stages": 12,
+      "planned_cases": 24,
+      "execution_status": "cutoff",
+      "stage_start_cutoff_utc": "2026-09-14T14:40:00+00:00",
+      "plan_sha256": "753da7d531bec7f94576d73cea08a71e9ea0b66a8b8c5ed64ccce05e0042e910",
+      "driver_revision": "8027097cce1d2d2c2608f13e589313895f1b3801",
+      "scenarios": [
+        {
+          "name": "primary-1024-put20",
+          "plan_sha256": "80c74d9a3500b0ef223da1207a961fbdced1f6078a5b2b934edfd1ea454b885e",
+          "stage_order": "ABBABAAB",
+          "adjacent_pairs": [
+            [
+              1,
+              2
+            ],
+            [
+              3,
+              4
+            ],
+            [
+              5,
+              6
+            ],
+            [
+              7,
+              8
+            ]
+          ],
+          "common_arguments": [
+            "--modes",
+            "throughput",
+            "--repeats",
+            "1",
+            "--requests",
+            "1000000",
+            "--workers",
+            "40",
+            "--keyspace",
+            "100000",
+            "--op",
+            "mixed",
+            "--write-ratio",
+            "20",
+            "--delete-ratio",
+            "0",
+            "--value-size",
+            "1024",
+            "--seed",
+            "1",
+            "--engine-workers",
+            "20",
+            "--rpc-pool",
+            "64",
+            "--gomaxprocs",
+            "4",
+            "--wal-batch",
+            "64",
+            "--wal-flush-ms",
+            "2",
+            "--snapshot-ms",
+            "5000",
+            "--sample-ms",
+            "100",
+            "--stats-ms",
+            "250",
+            "--run-timeout",
+            "900",
+            "--startup-timeout",
+            "10",
+            "--shutdown-timeout",
+            "60",
+            "--settle-timeout",
+            "60"
+          ],
+          "coverage_criteria": {
+            "measurement_min_seconds": 20,
+            "on_min_internal_completed_snapshots": 3,
+            "on_min_shared_idle_window_completed_snapshots": 3,
+            "idle_window_selection": "Earliest/latest internal successful samples with snapshot_in_progress=false; one common cohort; no endpoint selection using measured cost.",
+            "on_phase_means_require_no_failures": true,
+            "insufficient_evidence": "Keep all client values and raw deltas; mark affected means unavailable, no replacement."
+          },
+          "expected_complete_file_bytes": 105488918,
+          "client_counts": {
+            "valid": 16
+          },
+          "coverage_insufficient": [],
+          "observation_issues": [],
+          "engine_revisions": {
+            "A": "3179b64f9a1b37c9d50a294ca8141b73a75b557b",
+            "B": "df6a64e5cc7c663deb6269bfcd1d8e243c8b77fc"
+          },
+          "engine_sha256": {
+            "A": "9741b61c986aafdcdf9cf99d499c41e08c085f1f6390133d3db09185edbd5f5c",
+            "B": "5dd8f5f61e1b4f3fdbcb23aa06c61f8ff4ffa14e6a51b2f6eae3114e40ca5515"
+          },
+          "common_binaries": {
+            "gateway": "/mnt/nvme/minikv-review/snapshot-3179b64-binaries/gateway",
+            "bench": "/mnt/nvme/minikv-review/async-7d29382-reliable-workers20/binaries/bench",
+            "gateway_revision": "3179b64f9a1b37c9d50a294ca8141b73a75b557b",
+            "bench_revision": "7d293825a6bc6963ef9856b63cd08f932ee91f76",
+            "sha256": {
+              "gateway": "ab05a47cecffc90d7c5e307ca850869fcd23f3f473ba4a98818c6a8de62f6f85",
+              "bench": "2ef55eb18244b0e0e8b4b9d94318300c6090b59dda7423df529ac370f6bca4fc"
+            }
+          }
+        },
+        {
+          "name": "stress-128-put80",
+          "plan_sha256": "cf6263870a7403cec71b0dff2da9b1d51bcfbd58cd855c1689fcc6d619f8ec5f",
+          "stage_order": "ABBA",
+          "adjacent_pairs": [
+            [
+              1,
+              2
+            ],
+            [
+              3,
+              4
+            ]
+          ],
+          "common_arguments": [
+            "--modes",
+            "throughput",
+            "--repeats",
+            "1",
+            "--requests",
+            "1000000",
+            "--workers",
+            "40",
+            "--keyspace",
+            "100000",
+            "--op",
+            "mixed",
+            "--write-ratio",
+            "80",
+            "--delete-ratio",
+            "0",
+            "--value-size",
+            "128",
+            "--seed",
+            "1",
+            "--engine-workers",
+            "20",
+            "--rpc-pool",
+            "64",
+            "--gomaxprocs",
+            "4",
+            "--wal-batch",
+            "64",
+            "--wal-flush-ms",
+            "2",
+            "--snapshot-ms",
+            "5000",
+            "--sample-ms",
+            "100",
+            "--stats-ms",
+            "250",
+            "--run-timeout",
+            "900",
+            "--startup-timeout",
+            "10",
+            "--shutdown-timeout",
+            "60",
+            "--settle-timeout",
+            "60"
+          ],
+          "coverage_criteria": {
+            "measurement_min_seconds": 20,
+            "on_min_internal_completed_snapshots": 3,
+            "on_min_shared_idle_window_completed_snapshots": 3,
+            "idle_window_selection": "Earliest/latest internal successful samples with snapshot_in_progress=false; one common cohort; no endpoint selection using measured cost.",
+            "on_phase_means_require_no_failures": true,
+            "insufficient_evidence": "Keep all client values and raw deltas; mark affected means unavailable, no replacement."
+          },
+          "expected_complete_file_bytes": 15888918,
+          "client_counts": {
+            "valid": 4,
+            "not_executed": 4
+          },
+          "coverage_insufficient": [],
+          "observation_issues": [],
+          "engine_revisions": {
+            "A": "3179b64f9a1b37c9d50a294ca8141b73a75b557b",
+            "B": "df6a64e5cc7c663deb6269bfcd1d8e243c8b77fc"
+          },
+          "engine_sha256": {
+            "A": "9741b61c986aafdcdf9cf99d499c41e08c085f1f6390133d3db09185edbd5f5c",
+            "B": "5dd8f5f61e1b4f3fdbcb23aa06c61f8ff4ffa14e6a51b2f6eae3114e40ca5515"
+          },
+          "common_binaries": {
+            "gateway": "/mnt/nvme/minikv-review/snapshot-3179b64-binaries/gateway",
+            "bench": "/mnt/nvme/minikv-review/async-7d29382-reliable-workers20/binaries/bench",
+            "gateway_revision": "3179b64f9a1b37c9d50a294ca8141b73a75b557b",
+            "bench_revision": "7d293825a6bc6963ef9856b63cd08f932ee91f76",
+            "sha256": {
+              "gateway": "ab05a47cecffc90d7c5e307ca850869fcd23f3f473ba4a98818c6a8de62f6f85",
+              "bench": "2ef55eb18244b0e0e8b4b9d94318300c6090b59dda7423df529ac370f6bca4fc"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "prototype_validations": {
+    "scope": "Premeasurement isolated prototype gates, reported by root; these are functional gates, not performance acceptance.",
+    "normal": {
+      "session": 4594,
+      "exit_code": 0,
+      "cpp_tests": 4,
+      "cpp_total_seconds": 4.16,
+      "e2e_tests": 15,
+      "e2e_seconds": 18.159
+    },
+    "asan_ubsan": {
+      "session": 30684,
+      "exit_code": 0,
+      "cpp_tests": 4,
+      "e2e_tests": 15
+    },
+    "tsan": {
+      "session": 37292,
+      "exit_code": 0,
+      "cpp_tests": 4,
+      "cpp_total_seconds": 29.06
+    }
+  },
+  "source_reconstruction": {
+    "file": "prototype.patch",
+    "sha256": "5b50c2ae690ff643c8fc0f89e33c7bd5c61056fbce3e2268abc593a4654c2386",
+    "size_bytes": 6895,
+    "base_revision": "3179b64f9a1b37c9d50a294ca8141b73a75b557b",
+    "original_runtime_B_revision": "df6a64e5cc7c663deb6269bfcd1d8e243c8b77fc",
+    "included_in_raw_archive": false,
+    "applied_files_verified_equal_prototype": true,
+    "scope": "engine.h/cpp only. Applying to base reproduces source difference, not frozen executable bytes; record patched dirty source and rebuilt SHA separately."
+  },
+  "post_run_checks": {
+    "file": "POST_RUN_CHECKS.json",
+    "sha256": "d2e2d77460a20f6cff068541d1108d0e565148c6441bcd459d15bbf2dd379604",
+    "size_bytes": 24958,
+    "records": 24,
+    "counts": {
+      "verified": 20,
+      "not_checked": 4
+    },
+    "included_in_raw_archive": false,
+    "full_record_payloads_verified": false
+  }
+}

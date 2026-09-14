@@ -1,0 +1,132 @@
+diff --git a/cpp_engine/engine.cpp b/cpp_engine/engine.cpp
+index 3e14dbb..6f96667 100644
+--- a/cpp_engine/engine.cpp
++++ b/cpp_engine/engine.cpp
+@@ -300,7 +300,7 @@ void Engine::load_snapshot() {
+         bytes += read_bytes(file.fd, size - bytes.size());
+         const auto entry = codec::decode_record(bytes);
+         if (entry.operation != Operation::Put || codec::u64(bytes, 5) != applied_sequence_ ||
+-            !kv_.emplace(entry.key, entry.value).second) {
++            !kv_.emplace(entry.key, std::make_shared<const std::string>(entry.value)).second) {
+             throw std::runtime_error("invalid snapshot entry");
+         }
+     }
+@@ -333,7 +333,7 @@ void Engine::load_wal() {
+         // A crash after snapshot installation can leave the old WAL intact.
+         if (sequence > applied_sequence_) {
+             if (sequence != applied_sequence_ + 1) throw std::runtime_error("missing WAL sequence");
+-            if (entry.operation == Operation::Put) kv_[entry.key] = entry.value;
++            if (entry.operation == Operation::Put) kv_[entry.key] = std::make_shared<const std::string>(entry.value);
+             else kv_.erase(entry.key);
+             applied_sequence_ = sequence;
+         }
+@@ -368,7 +368,7 @@ void Engine::import_legacy() {
+         if (separator == std::string::npos) throw std::runtime_error("invalid legacy snapshot record");
+         Request entry{Operation::Put, line.substr(0, separator), line.substr(separator + 1)};
+         if (!codec::valid_request(entry)) throw std::runtime_error("invalid legacy key/value size");
+-        kv_[entry.key] = entry.value;
++        kv_[entry.key] = std::make_shared<const std::string>(entry.value);
+     });
+     read_lines(config_.data_dir + "/wal.log", [this](const std::string& line) {
+         std::istringstream input(line);
+@@ -381,7 +381,7 @@ void Engine::import_legacy() {
+         if ((op != "PUT" && op != "DEL") || !codec::valid_request(entry)) {
+             throw std::runtime_error("invalid legacy WAL operation or data");
+         }
+-        if (operation == Operation::Put) kv_[key] = value;
++        if (operation == Operation::Put) kv_[key] = std::make_shared<const std::string>(value);
+         else kv_.erase(key);
+         ++applied_sequence_;
+     });
+@@ -400,7 +400,7 @@ Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_
+     if (stopping_) return {{Status::Busy, "engine is stopping"}};
+     if (request.operation == Operation::Get) {
+         const auto it = kv_.find(request.key);
+-        Response result = it == kv_.end() ? Response{Status::NotFound, {}} : Response{Status::Value, it->second};
++        Response result = it == kv_.end() ? Response{Status::NotFound, {}} : Response{Status::Value, *it->second};
+         return {std::move(result), applied_sequence_, config_.wal_mode == WalMode::Reliable};
+     }
+     const size_t size = codec::kRecordHeader + request.key.size() + request.value.size() + 4;
+@@ -414,10 +414,13 @@ Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_
+     const uint64_t sequence = applied_sequence_ + 1;
+     Status status = Status::Ok;
+     try {
++        // Prepare the immutable value before changing the pending WAL queue.
++        Value value;
++        if (request.operation == Operation::Put) value = std::make_shared<const std::string>(request.value);
+         // This mutex defines one order for the WAL, memory, and snapshot boundary.
+         pending_.push_back({sequence, codec::record(sequence, request.operation, request.key, request.value)});
+         pending_bytes_ += size;
+-        if (request.operation == Operation::Put) kv_[request.key] = request.value;
++        if (request.operation == Operation::Put) kv_[request.key] = std::move(value);
+         else if (kv_.erase(request.key) == 0) status = Status::NotFound;
+         applied_sequence_ = sequence;
+     } catch (const std::exception& error) {
+@@ -575,7 +578,7 @@ void Engine::flush_locked() {
+     }
+ }
+ 
+-void Engine::install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence,
++void Engine::install_snapshot(const ValueMap& image, uint64_t sequence,
+                               uint64_t& write_calls, uint64_t& written_bytes, uint64_t& installed_bytes) {
+     const std::string temporary = config_.data_dir + "/snapshot.v1.tmp";
+     const std::string installed = config_.data_dir + "/snapshot.v1";
+@@ -602,7 +605,7 @@ void Engine::install_snapshot(const std::unordered_map<std::string, std::string>
+         buffered += bytes.size();
+     };
+     append(snapshot_header(sequence, image.size()));
+-    for (const auto& entry : image) append(codec::record(sequence, Operation::Put, entry.first, entry.second));
++    for (const auto& entry : image) append(codec::record(sequence, Operation::Put, entry.first, *entry.second));
+     // A write failure must escape before the sync hook or snapshot installation.
+     flush();
+     hook("snapshot.sync");
+@@ -670,7 +673,7 @@ void Engine::snapshot() {
+     }
+     try {
+         std::unique_lock<std::mutex> io_lock(io_mutex_, std::defer_lock);
+-        std::unordered_map<std::string, std::string> image;
++        ValueMap image;
+         std::deque<PendingRecord> batch;
+         size_t batch_bytes;
+         uint64_t sequence;
+diff --git a/cpp_engine/engine.h b/cpp_engine/engine.h
+index f4ce0d5..b1fd94d 100644
+--- a/cpp_engine/engine.h
++++ b/cpp_engine/engine.h
+@@ -6,6 +6,7 @@
+ #include <deque>
+ #include <functional>
+ #include <list>
++#include <memory>
+ #include <mutex>
+ #include <optional>
+ #include <string>
+@@ -127,6 +128,10 @@ public:
+     EngineStats stats() const;
+ 
+ private:
++    // Values are never changed in place; a captured map owns the old versions.
++    using Value = std::shared_ptr<const std::string>;
++    using ValueMap = std::unordered_map<std::string, Value>;
++
+     struct PendingRecord {
+         uint64_t sequence;
+         std::string bytes;
+@@ -155,7 +160,7 @@ private:
+     void flush_pending();
+     // Requires both I/O and state locks; used only for the final shutdown flush.
+     void flush_locked();
+-    void install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence,
++    void install_snapshot(const ValueMap& image, uint64_t sequence,
+                           uint64_t& write_calls, uint64_t& written_bytes, uint64_t& installed_bytes);
+     void compact_wal(int64_t boundary, uint64_t& written_bytes);
+     void background_work();
+@@ -175,7 +180,7 @@ private:
+     std::condition_variable wake_;
+     std::condition_variable snapshot_wake_;
+     std::condition_variable committed_;
+-    std::unordered_map<std::string, std::string> kv_;
++    ValueMap kv_;
+     std::deque<PendingRecord> pending_;
+     // Registration shares the state lock with apply and durable publication;
+     // targets are nondecreasing. Splicing a reserved node cannot allocate.
