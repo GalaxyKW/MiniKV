@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "All six reliable-mode runs of async 7d29382, followed by all six return-control runs using the original frozen sync 25cec55 executables, with 20 data workers and fixed workload/settings. The first sync reference is archived separately and is not duplicated here. Actual executable copies and generated data omitted; original absolute paths and driver Git metadata are provenance, not proof of runtime version. Host-context collection views differ between the first reference and these two matrices.",
+  "initial_reference": {
+    "archive": "../2026-09-14-worker-control/workers20.tar.gz",
+    "sha256": "1c57c53901b9d84920776b2ffbe2d249eafd063819e313a4432ee08230f29d03",
+    "runtime_revision": "25cec555f70e338baaf8dad1eec579589f79bf5f",
+    "runs": 6
+  },
+  "archives": [
+    {
+      "name": "async7d",
+      "file": "async7d.tar.gz",
+      "runtime_revision": "7d293825a6bc6963ef9856b63cd08f932ee91f76",
+      "sha256": "a15deb490fc769650b4cf4d66629b626cfc71538979834a6b74d8ea303f0657e",
+      "size_bytes": 282653,
+      "raw_bytes": 3758283,
+      "files": 69,
+      "runs": 6
+    },
+    {
+      "name": "sync25-return",
+      "file": "sync25-return.tar.gz",
+      "runtime_revision": "25cec555f70e338baaf8dad1eec579589f79bf5f",
+      "sha256": "b8a80d1c0e1bcd033405423d10407decbebd76d342071ff07968b1486b5e653d",
+      "size_bytes": 357501,
+      "raw_bytes": 4593155,
+      "files": 69,
+      "runs": 6
+    }
+  ]
+}
