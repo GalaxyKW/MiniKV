@@ -11,10 +11,11 @@ make sanitize-test
 
 | 命令 | 实际执行内容 |
 | --- | --- |
-| `make test` | 构建 C++ 引擎、Go 网关与压测工具；运行三个 C++ 测试程序、`go test -race -timeout 60s ./...` 和 Python 端到端测试 |
+| `make test` | 构建 C++ 引擎、Go 网关与压测工具；运行三个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
 | `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及三个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
+| `make experiment-test` | 使用 Python 标准库验证元数据采样、隔离实验、异常报告与子进程清理；不需要提前构建服务 |
 
 [CI 工作流](../.github/workflows/ci.yml) 在 push 和 pull request 时执行 `make test` 与 `make sanitize-test`。ThreadSanitizer 检查需要按下文手动运行。
 
@@ -32,6 +33,8 @@ make sanitize-test
 | 运行状态 | WAL 队列与写盘批次区分、提交和快照失败计数、重启归零、RPC 等待与重试统计；状态查询不泄漏用户数据 | [stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
 | 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理；并发聚合中成功、失败、未命中与网络错误的计数守恒 | [main_test.go](../benmark/main_test.go) |
 | 可复现实验 | 参数边界与无副作用解析、跨 worker 请求集合、低分配生成、精确分位数与大均值、JSON 输出与失败分类 | [config_test.go](../benmark/config_test.go)、[workload_test.go](../benmark/workload_test.go)、[report_test.go](../benmark/report_test.go) |
+| 实验管理 | 新目录不覆盖、完整矩阵与失败产物、超时和信号下回收子进程、隔离继承环境、资源缺失与 PID 复用 | [experiment_test.py](../tests/experiment_test.py)、[experiment_support_test.py](../tests/experiment_support_test.py) |
+| 实验观测边界 | 持续小块响应仍受总截止时间限制、正文大小与截断检查；排除预置和跨测量边界的快照，区分 RSS 样本与生命周期峰值 | [experiment_http_test.py](../tests/experiment_http_test.py)、[experiment_observations_test.py](../tests/experiment_observations_test.py) |
 | 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、1 MiB value、客户端 RST、非法帧、队列过载、停机响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
 
 端到端测试还验证数据 worker、数据队列和网关 RPC 名额被占用时，`/stats` 仍可返回；引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
@@ -73,6 +76,8 @@ setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 \
 这不会修改系统级 ASLR 配置。如果环境禁止 `setarch` 修改进程属性，需要在允许该操作的环境中运行；此类启动失败无法得出测试是否通过的结论。
 
 ## 运行一次可复现的压测
+
+要自动启动临时服务、重复运行两种 WAL 模式与快照开关，并保存全部配置和资源采样，可使用 `make benchmark`，见[自动化性能实验](benchmark-experiments.md)。下面说明连接已有服务的单次压测。
 
 按 [README](../README.md) 启动引擎和网关后，运行：
 

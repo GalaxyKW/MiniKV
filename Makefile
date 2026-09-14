@@ -1,8 +1,9 @@
 BUILD_DIR ?= build
 BUILD_TYPE ?= RelWithDebInfo
 JOBS ?= 2
+BENCH_ARGS ?=
 
-.PHONY: all engine go test unit-test integration-test sanitize-test clean
+.PHONY: all engine go test unit-test integration-test experiment-test benchmark sanitize-test clean
 
 all: engine go
 
@@ -22,7 +23,13 @@ unit-test: all
 integration-test: all
 	MINIKV_TEST_ENGINE=$(abspath $(BUILD_DIR))/engine python3 tests/integration_test.py -v
 
-test: unit-test integration-test
+experiment-test:
+	python3 -m unittest discover -s tests -p 'experiment*_test.py' -v
+
+benchmark: all
+	python3 benmark/experiment.py --engine $(abspath $(BUILD_DIR))/engine $(BENCH_ARGS)
+
+test: unit-test integration-test experiment-test
 
 sanitize-test: go
 	cmake -S cpp_engine -B build-asan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DMINIKV_SANITIZERS=ON

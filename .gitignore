@@ -59,6 +59,7 @@ data/*.v1
 data/*.tmp
 /data-demo/
 /data-snapshot-bench/
+/benmark/results/
 __pycache__/
 
 # editor
