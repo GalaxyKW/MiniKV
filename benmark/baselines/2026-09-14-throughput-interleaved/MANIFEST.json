@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "description": "All 16 throughput runs in the predeclared A B B A B A A B engine-only comparison: A is frozen 7d29382 Engine and B is frozen d2d5eb8 Engine; both use the same frozen 7d Gateway and Benchmark. Each stage runs snapshot off then on with one repeat and 500000 measured requests. The complete parent plan, eight host-before records, and all eight stage artifacts are retained. Only actual executable copies and generated data are omitted. Compare adjacent A/B pairs separately by snapshot condition; observed differences do not establish a stable gain or their cause. Original absolute paths and driver Git metadata are provenance, not current file locations or runtime versions.",
+  "archives": [
+    {
+      "name": "engine7d-d2",
+      "file": "engine7d-d2.tar.gz",
+      "sha256": "8d504b8822bb87c0c89ef8ceeac7bae9393717a2fec3bf59c0c8226ad6cc087c",
+      "size_bytes": 462773,
+      "raw_bytes": 5096413,
+      "files": 209,
+      "stages": 8,
+      "runs": 16,
+      "stage_order": "ABBABAAB",
+      "adjacent_pairs": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          7,
+          8
+        ]
+      ],
+      "engine_runtime_revisions": {
+        "A": "7d293825a6bc6963ef9856b63cd08f932ee91f76",
+        "B": "d2d5eb862ee1cf11fcbeb68c04c66d740613338e"
+      },
+      "engine_sha256": {
+        "A": "5bf67c7eb3ddf2ce0c665c269d488fd2a811e53bb2ec284778261dcc68c390e8",
+        "B": "efabc96b11ae376fa020b052215f57af286729d7c5b76722b9ddaba6d9f022a0"
+      },
+      "common_binary_sha256": {
+        "gateway": "6fed313c6f924c21871cc05cf5589a5a6189cde1663492d682ec5b5ea3981882",
+        "bench": "2ef55eb18244b0e0e8b4b9d94318300c6090b59dda7423df529ac370f6bca4fc"
+      },
+      "plan_sha256": "96ff0713d7425b41146c2c159af6006811493667f73a8d2e586ecdb556fd1317"
+    }
+  ]
+}
