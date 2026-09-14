@@ -21,6 +21,7 @@ from experiment_support import collect_metadata, sample_process
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MAX_DURATION_NS = (1 << 63) - 1
 INTERRUPT_STATE = {"launching": False, "pending": None}
 
 
@@ -321,10 +322,12 @@ def read_report(path, expected):
                 or any(type(operations[name]) is not int or operations[name] < 0 for name in ("put", "get", "delete"))
                 or sum(operations.values()) != outcomes["requests"]):
             raise ValueError("operation counts do not reconcile")
+        if expected["operation"] != "mixed" and operations[expected["operation"]] != outcomes["requests"]:
+            raise ValueError("operation counts contradict the configured workload")
         latency = report["latency_ns"]
         if (latency["samples"] != outcomes["requests"] or type(report["elapsed_ns"]) is not int
-                or report["elapsed_ns"] <= 0
-                or any(type(latency[name]) is not int or latency[name] < 0
+                or not 0 < report["elapsed_ns"] <= MAX_DURATION_NS
+                or any(type(latency[name]) is not int or not 0 <= latency[name] <= MAX_DURATION_NS
                        for name in ("samples", "mean", "min", "p50", "p95", "p99", "p99_9", "max"))):
             raise ValueError("invalid latency samples or elapsed time")
         for field in ("qps_total", "qps_successful", "system_success_rate_pct"):
@@ -342,11 +345,21 @@ def read_report(path, expected):
             raise ValueError("inconsistent latency summary")
         preload = report["preload"]
         target = expected["keyspace"] if expected["operation"] in ("get", "mixed") else 0
-        if (preload["target_keys"] != target or preload["completed_keys"] != target
-                or type(preload["elapsed_ns"]) is not int or preload["elapsed_ns"] < 0):
+        if (type(preload["target_keys"]) is not int or type(preload["completed_keys"]) is not int
+                or preload["target_keys"] != target or preload["completed_keys"] != target
+                or type(preload["elapsed_ns"]) is not int or not 0 <= preload["elapsed_ns"] <= MAX_DURATION_NS):
             raise ValueError("preload did not complete the requested initial dataset")
         if outcomes["failures"]:
             raise ValueError(f"{outcomes['failures']} benchmark requests failed")
+        statuses = report["http_statuses"]
+        if not isinstance(statuses, dict) or any(type(value) is not int or value < 0 for value in statuses.values()):
+            raise ValueError("invalid HTTP status counts")
+        expected_statuses = {key: value for key, value in (("200", outcomes["successes"]),
+                                                          ("404", outcomes["logical_misses"])) if value}
+        if {key: value for key, value in statuses.items() if value} != expected_statuses:
+            raise ValueError("HTTP status counts contradict successful outcomes")
+        if outcomes["logical_misses"] > operations["get"] + operations["delete"]:
+            raise ValueError("PUT cannot produce a logical miss")
         timestamp_ns(report["measurement_started_at"])
         return report
     except (OSError, ValueError, KeyError, TypeError, AttributeError, OverflowError) as error:
@@ -593,7 +606,10 @@ def main(argv=None):
                 metrics = result["metrics"]
                 print(f"  QPS successful={metrics['qps_successful']:.1f}, P99={metrics['p99_ns'] / 1000000:.3f} ms", flush=True)
                 if case["snapshot_interval_ms"] and not result["observations"]["snapshot_activity_observed"]:
-                    print("  No snapshot activity observed inside measurement; extend the run before comparing snapshot cost.", flush=True)
+                    if args.stats_ms == 0:
+                        print("  Periodic status sampling is disabled; measurement-window snapshot evidence is unavailable.", flush=True)
+                    else:
+                        print("  No snapshot activity observed inside measurement; extend the run before comparing snapshot cost.", flush=True)
             else:
                 exit_code = 1
                 print("  " + "; ".join(result["errors"]), file=sys.stderr, flush=True)

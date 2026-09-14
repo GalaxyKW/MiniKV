@@ -166,7 +166,8 @@ elif role == "bench":
                "preload": {"target_keys": preloaded, "completed_keys": preloaded, "elapsed_ns": 1}, "elapsed_ns": 100000000,
                "outcomes": {"requests": count, "successes": count, "logical_misses": 0, "failures": 0,
                             "network_errors": 0, "timeouts": 0, "transport_errors": 0, "http_failures": 0, "protocol_failures": 0},
-               "operations": {"put": 0, "get": count, "delete": 0}, "http_statuses": {"200": count},
+               "operations": {name: count if name == (args["op"] if args["op"] != "mixed" else "get") else 0
+                              for name in ("put", "get", "delete")}, "http_statuses": {"200": count},
                "latency_ns": {"samples": count, "mean": 1000, "min": 1000, "p50": 1000,
                               "p95": 1000, "p99": 1000, "p99_9": 1000, "max": 1000},
                "qps_total": count * 10, "qps_successful": count * 10, "system_success_rate_pct": 100}
@@ -187,6 +188,22 @@ elif role == "bench":
         payload["qps_total"] = 10 ** 1000
     elif behavior == "config_mismatch":
         payload["config"]["seed"] += 1
+    elif behavior == "contradictory_statuses":
+        payload["http_statuses"] = {"500": count}
+    elif behavior == "fractional_statuses":
+        payload["http_statuses"] = {"200": float(count)}
+    elif behavior == "fractional_preload":
+        payload["preload"]["completed_keys"] = float(payload["preload"]["completed_keys"])
+    elif behavior == "elapsed_overflow":
+        payload["elapsed_ns"] = 1 << 63
+        payload["qps_total"] = payload["qps_successful"] = count * 1000000000 / payload["elapsed_ns"]
+    elif behavior == "preload_overflow":
+        payload["preload"]["elapsed_ns"] = 1 << 63
+    elif behavior == "latency_overflow":
+        for field in ("mean", "min", "p50", "p95", "p99", "p99_9", "max"):
+            payload["latency_ns"][field] = 1 << 63
+    elif behavior == "operation_mismatch":
+        payload["operations"] = {"put": 0, "get": count, "delete": 0}
     print(json.dumps(payload))
     if behavior == "trailing_json":
         print("{}")
@@ -383,10 +400,13 @@ class ExperimentRunnerTests(unittest.TestCase):
 
     def test_bad_or_failed_reports_cannot_be_successful_experiments(self):
         for behavior in ("malformed", "trailing_json", "incomplete", "inconsistent", "failed_requests", "exit_failure",
-                         "nan_rate", "infinite_rate", "huge_rate", "config_mismatch"):
+                         "nan_rate", "infinite_rate", "huge_rate", "config_mismatch", "contradictory_statuses",
+                         "fractional_statuses", "fractional_preload", "elapsed_overflow", "preload_overflow",
+                         "latency_overflow", "operation_mismatch"):
             with self.subTest(behavior=behavior):
                 self.output = self.directory / behavior
-                self.invoke(control={"bench": behavior}, expected=1)
+                extra = ("--op", "put") if behavior == "operation_mismatch" else ()
+                self.invoke(control={"bench": behavior}, extra=extra, expected=1)
                 self.assertTrue(list(self.output.glob("*/result.json")), "failure did not preserve a run result")
                 self.assertTrue(list(self.output.glob("*/report.json")), "failure lost the raw benchmark output")
                 for path in self.output.glob("*/result.json"):

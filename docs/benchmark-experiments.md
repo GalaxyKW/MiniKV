@@ -102,6 +102,26 @@ python3 benmark/experiment.py --help
 
 吞吐模式在压测结束时可能仍有未同步 WAL。程序分别保留立即采样的 `stats-after.json` 和排空后的 `stats-settled.json`，将额外等待记录为 `wal_drain_elapsed_ns`；排空时间不会加进压测报告的测量耗时或 QPS 分母。
 
+## 汇总多轮结果
+
+汇总工具只读取已有产物，不启动服务、不修改输入目录：
+
+```sh
+python3 benmark/summarize.py /tmp/minikv-reliable-experiment
+python3 benmark/summarize.py /tmp/minikv-reliable-experiment --format json > /tmp/minikv-summary.json
+python3 benmark/summarize.py /tmp/minikv-reliable-experiment --format csv > /tmp/minikv-summary.csv
+```
+
+将示例路径换成实际实验目录。可同时传入多个目录，但各实验始终分别汇总，不自动混合不同版本、配置或负载的结果。重定向会覆盖同名输出文件，保留不同实验时应使用不同文件名。
+
+工具先核对计划是否包含参数指定的完整矩阵，再逐轮核对命令、报告、状态和退出记录，按 WAL 模式与快照间隔分组。输出包含每轮值，以及成功 QPS、每轮 P99、进程 RSS/HWM 的有效轮次数、最小值、中位数和最大值。**多轮 P99 的中位数不是合并全部请求后的 P99。** 失败、中断、缺失和未完成的轮次仍列出；缺少资源样本使用 `null`，不会按 0 计算。
+
+资源和快照证据从原始 JSONL 重新计算，不直接采用 `index.json` 或 `result.json` 中缓存的指标。开启快照但缺少测量期活动证据的轮次会明确标记，不能据此推断快照代价。
+
+目录可以整体移动。原始绝对命令路径作为来源记录，不会被跟随读取；保留的执行文件副本存在时会核对 SHA-256。便携归档可以省略全部执行文件副本，此时显示 `recorded_hashes_only`，说明只有记录中的哈希，无法重新核验文件内容；存在但不匹配的副本会使相关结果无效。
+
+JSON 和 CSV 汇总结构版本为 1；QPS 单位为请求/秒，P99 为毫秒，内存为字节。所有计划轮次有效时退出 0；存在失败、缺失、中断、未完成或无效轮次时仍输出汇总并退出 1；参数或根 manifest 不合法时退出 2。可选采样缺失本身不等于请求失败，仍应查看警告和有效样本数。
+
 ## 采样与快照观测
 
 `--sample-ms` 控制周期资源采样，`--stats-ms` 控制周期 `/stats` 查询。二者都可设为 0：
