@@ -191,6 +191,8 @@ make sanitize-test
 
 这会预热并修改 `k0` 至 `k999`。报告包含总 QPS、成功吞吐量（含正常未命中）、P50/P95/P99/P99.9、错误数和状态码分布。延迟统计包含失败请求，预热耗时不计入测量；预热失败或出现系统失败时，工具以非零状态退出。
 
+增加 `-format json` 可保存带版本的客户端配置、实际操作数和分类错误报告。负载按 seed 和请求编号生成，改变并发数不会改变请求内容的集合；并发交错与命中率仍可能变化。参数与报告字段见[压测报告指南](docs/benchmark-report.md)。
+
 比较时应固定提交、硬件、构建类型、持久化模式和负载，分别报告两种模式的结果，并保留原始输出。当前工具采用固定并发的闭环负载，服务变慢时发送速率也会下降；判断过载容量还需要固定到达速率实验。
 
 实验记录要求、快照代价与指标口径见[测试与性能实验](docs/testing.md#运行一次可复现的压测)。`benmark/out/` 中的历史结果来自修复前版本，不能用作当前版本的性能结论。
@@ -215,6 +217,7 @@ make sanitize-test
 | 运行指标、计数边界与状态查询故障 | [运行状态指南](docs/observability.md) |
 | 提交顺序、锁、文件格式与故障模型 | [存储与协议设计](docs/design.md) |
 | 回归测试、数据竞争检查与性能实验 | [测试与性能实验](docs/testing.md) |
+| 压测参数、确定性负载与 JSON 结果 | [压测报告指南](docs/benchmark-report.md) |
 | 内存状态、WAL、快照与恢复 | [cpp_engine/engine.cpp](cpp_engine/engine.cpp) |
 | TCP 连接管理与二进制编码 | [cpp_engine/server.cpp](cpp_engine/server.cpp)、[codec.h](cpp_engine/codec.h) |
 | HTTP 网关与 RPC 连接池 | [go_server/](go_server/) |

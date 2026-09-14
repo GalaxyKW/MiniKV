@@ -425,6 +425,41 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertIn("P99.9", result.stdout)
         self.assertIn("成功吞吐量", result.stdout)
 
+    def test_json_benchmark_matches_storage_operations(self):
+        code, before = self.runtime_stats()
+        self.assertEqual(code, 200)
+        result = subprocess.run([
+            str(BENCH), "-url", f"http://127.0.0.1:{self.http_port}/kv",
+            "-workers=8", "-requests=257", "-op=mixed", "-keyspace=23",
+            "-preload-count=0", "-write-ratio=35", "-delete-ratio=15",
+            "-seed=-19", "-value-size=128", "-format=json",
+        ], capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["schema_version"], 1)
+        self.assertTrue(report["complete"])
+        self.assertEqual(report["load_model"], "closed_loop")
+        self.assertEqual(report["workload_generator"], "indexed-pcg-v1")
+        self.assertEqual(report["config"]["preload_count"], 0)
+        self.assertEqual(report["preload"]["target_keys"], 23)
+        self.assertEqual(report["preload"]["completed_keys"], 23)
+        self.assertIn("预热", result.stderr)
+        outcomes = report["outcomes"]
+        self.assertEqual(outcomes["requests"], 257)
+        self.assertEqual(outcomes["failures"], 0)
+        self.assertEqual(outcomes["successes"] + outcomes["logical_misses"], 257)
+        self.assertEqual(sum(report["operations"].values()), 257)
+        self.assertEqual(sum(report["http_statuses"].values()), 257)
+        self.assertEqual(report["latency_ns"]["samples"], 257)
+        code, after = self.runtime_stats()
+        self.assertEqual(code, 200)
+        # Independently reconcile the client report with actual engine sequence
+        # advancement: every PUT/DELETE (including misses) adds exactly one LSN.
+        writes = report["operations"]["put"] + report["operations"]["delete"]
+        self.assertEqual(after["engine"]["applied_sequence"] - before["engine"]["applied_sequence"], 23 + writes)
+        self.assertEqual(after["engine"]["durable_sequence"], after["engine"]["applied_sequence"])
+        self.assertEqual(after["gateway"]["rpc"]["calls_total"] - before["gateway"]["rpc"]["calls_total"], 23 + 257)
+
 
 if __name__ == "__main__":
     unittest.main()

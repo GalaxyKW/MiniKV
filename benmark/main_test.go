@@ -131,8 +131,16 @@ func TestRunBenchmarkAggregatesAllOutcomes(t *testing.T) {
 			if result.successes+result.logicalMisses+result.failures != int64(result.total) {
 				t.Error("outcome counts do not add up to total requests")
 			}
+			if result.errors+result.httpFailures+result.protocolFailures != result.failures || result.timeouts != 0 ||
+				result.httpFailures != wantUnavailable+putNotFound.Load() || result.protocolFailures != wantMalformed {
+				t.Errorf("failure categories do not preserve their distinct causes: %#v", result)
+			}
+			if result.operations["put"]+result.operations["get"]+result.operations["delete"] != int64(test.requests) {
+				t.Errorf("operation counts do not add up to total requests: %v", result.operations)
+			}
 			wantStatuses := map[int]int64{
-				http.StatusOK:                 wantSuccesses + wantMalformed,
+				// Body truncation is a transport failure after HTTP 200 was seen.
+				http.StatusOK:                 wantSuccesses + wantMalformed + wantErrors,
 				http.StatusNotFound:           wantNotFound,
 				http.StatusServiceUnavailable: wantUnavailable,
 			}

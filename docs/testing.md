@@ -31,9 +31,10 @@ make sanitize-test
 | HTTP 与 RPC | 参数与状态码映射、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
 | 运行状态 | WAL 队列与写盘批次区分、提交和快照失败计数、重启归零、RPC 等待与重试统计；状态查询不泄漏用户数据 | [stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
 | 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理；并发聚合中成功、失败、未命中与网络错误的计数守恒 | [main_test.go](../benmark/main_test.go) |
+| 可复现实验 | 参数边界与无副作用解析、跨 worker 请求集合、低分配生成、精确分位数与大均值、JSON 输出与失败分类 | [config_test.go](../benmark/config_test.go)、[workload_test.go](../benmark/workload_test.go)、[report_test.go](../benmark/report_test.go) |
 | 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、1 MiB value、客户端 RST、非法帧、队列过载、停机响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
 
-端到端测试还验证数据 worker、数据队列和网关 RPC 名额被占用时，`/stats` 仍可返回；引擎退出后可继续获取网关统计，重启后可读取恢复序列。
+端到端测试还验证数据 worker、数据队列和网关 RPC 名额被占用时，`/stats` 仍可返回；引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
 
 这些检查分别验证具体并发交错、错误处理和恢复边界。进程退出测试不等同于真实断电测试；文件同步的持久性仍依赖操作系统、文件系统和设备履行 `fdatasync/fsync` 约定。已有回归检查也不代表已经测得性能提升。
 
@@ -103,7 +104,9 @@ setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 \
 - 请求数、并发度、操作比例、key 空间、value 大小、随机种子、预热方式与观测到的未命中率。
 - 每轮原始输出、重复轮次与波动；不要只保存最好的一轮。
 
-固定随机种子便于控制负载生成参数，但并发调度和混合读写仍会改变实际交错与命中率。`throughput` 与 `reliable` 的成功确认语义不同，应分别报告结果。
+负载按 seed 和请求编号生成，相同负载参数下改变 worker 数量不会改变操作、key 和 value 的集合；并发调度仍会改变到达顺序、命中率和最终状态。比较时同时记录生成器版本。`throughput` 与 `reliable` 的成功确认语义不同，应分别报告结果。
+
+使用 `-format json` 可以保存带版本的完整客户端配置与原始报告；stdout 只有 JSON，预置进度写入 stderr。参数校验、退出码、确定性负载和字段定义见[压测配置与 JSON 报告](benchmark-report.md)。
 
 ## 正确解读报告
 
@@ -114,10 +117,10 @@ setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 \
 | 系统成功率 | 成功请求与正常未命中之和 / 总请求数 |
 | 逻辑未命中 | GET/DELETE 返回 HTTP 404 且正文恰为 `NOT_FOUND\n` |
 | 失败请求 | 网络错误，或 HTTP 状态/响应格式不符合操作契约 |
-| 网络错误 | 客户端请求或读取响应失败，是失败请求的一部分 |
+| 网络错误 | 客户端请求或读取响应失败，是失败请求的一部分；区分超时与其他传输错误 |
 | 平均与 P50/P95/P99/P99.9 延迟 | 对全部测量请求统计，包含失败请求；不包含预热 |
 
-报告还列出 HTTP 状态码分布。工具会同时检查状态码和响应正文；预热失败或测量中存在系统失败时以非零状态退出，正常未命中本身不会导致失败退出。完整实现见 [压测工具](../benmark/main.go)。
+报告还列出 HTTP 状态码分布、实际操作数和 HTTP / 响应格式失败分类。收到响应头后即使正文读取失败，也保留该 HTTP 状态。工具会同时检查状态码和响应正文；预置失败或测量中存在系统失败时以非零状态退出，正常未命中本身不会导致失败退出。完整实现见 [压测工具](../benmark/main.go)。
 
 延迟保存在一个按请求编号索引的精确切片中，报告前排序计算分位数；该切片在 64 位环境中占约 `8 × requests` 字节，另有每个 worker 的局部计数。请求数很大时仍需为客户端准备足够内存。GET/DELETE 不生成写入 value，`value-size` 影响 PUT 和数据预置。
 
