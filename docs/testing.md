@@ -15,7 +15,7 @@ make sanitize-test
 | `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及四个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
-| `make experiment-test` | 使用 Python 标准库验证元数据采样、隔离实验、报告汇总与子进程清理；不需要提前构建服务 |
+| `make experiment-test` | 使用 Python 标准库验证元数据采样、隔离实验、报告汇总、快照离线分析与子进程清理；不需要提前构建服务 |
 
 [CI 工作流](../.github/workflows/ci.yml) 在 push 和 pull request 时执行 `make test` 与 `make sanitize-test`。ThreadSanitizer 检查需要按下文手动运行。
 
@@ -39,6 +39,7 @@ make sanitize-test
 | 实验管理 | 新目录不覆盖、完整矩阵与失败产物、超时和信号下回收子进程、隔离继承环境、资源缺失与 PID 复用 | [experiment_test.py](../tests/experiment_test.py)、[experiment_support_test.py](../tests/experiment_support_test.py) |
 | 实验观测边界 | 持续小块响应仍受总截止时间限制、正文大小与截断检查；排除预置和跨测量边界的快照，区分 RSS 样本与生命周期峰值 | [experiment_http_test.py](../tests/experiment_http_test.py)、[experiment_observations_test.py](../tests/experiment_observations_test.py) |
 | 实验汇总 | 完整计划与失败轮次、配置和日志序列对账、资源进程身份、缺失值与多格式输出；搬移后的归档仍可只读复查 | [experiment_summary_test.py](../tests/experiment_summary_test.py) |
+| 快照离线分析 | 共同空闲窗口、预置与忙碌端点排除、覆盖门槛、旧字段缺失与真实零值、uint64 与累计倒退、最大值口径；保留无效轮次且不修改归档 | [experiment_snapshot_report_test.py](../tests/experiment_snapshot_report_test.py) |
 | 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、1 MiB value、客户端 RST、非法帧、队列过载、停机响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
 
 端到端测试还验证：可靠确认释放 worker，但继续占用请求名额；WAL 容量阻塞 worker、数据队列和网关 RPC 名额时，`/stats` 仍可返回；断连后旧请求不会释放名额供重连绕过限制；网络停机宽限结束后，异步回调仍能排空且数据可恢复。引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
