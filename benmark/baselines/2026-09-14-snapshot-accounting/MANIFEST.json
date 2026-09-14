@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "description": "All 16 runs of the predeclared ABBABAAB accounting experiment. A=1470c5f removes only 64KiB snapshot grouping; B=3179b64 retains grouping. Both include the same seven counters and fixed 3179 Gateway / 7d Benchmark. Complete parent plan, host-before files and all eight stage artifacts are preserved; only binaries and generated data are omitted. ON negative votes are 2/4, so the predeclared automatic withdrawal rule does not trigger; this does not establish acceptance, equivalence, or absence of regression. All slow cases including 02-B ON max 283.851464ms and 07-A ON are retained.",
+  "archives": [
+    {
+      "name": "snapshot-accounting-1470-3179",
+      "file": "snapshot-accounting-1470-3179.tar.gz",
+      "sha256": "5f4f7bbc365b64250c62a3744ef258063420a50ecb1f2456fb8864c400998fb4",
+      "size_bytes": 1583687,
+      "raw_bytes": 22161893,
+      "files": 209,
+      "stages": 8,
+      "runs": 16,
+      "stage_order": "ABBABAAB",
+      "adjacent_pairs": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          7,
+          8
+        ]
+      ],
+      "engine_runtime_revisions": {
+        "A": "1470c5fdd5f93cf85e099dc1e69dd1c24573f8b2",
+        "B": "3179b64f9a1b37c9d50a294ca8141b73a75b557b"
+      },
+      "engine_sha256": {
+        "A": "3edddd501c6dc3b16901ed2b9ce2754b9c3fe955b199ed2dd0d2f74250946f83",
+        "B": "9741b61c986aafdcdf9cf99d499c41e08c085f1f6390133d3db09185edbd5f5c"
+      },
+      "common_binary_sha256": {
+        "gateway": "ab05a47cecffc90d7c5e307ca850869fcd23f3f473ba4a98818c6a8de62f6f85",
+        "bench": "2ef55eb18244b0e0e8b4b9d94318300c6090b59dda7423df529ac370f6bca4fc"
+      },
+      "common_binary_revisions": {
+        "gateway": "3179b64f9a1b37c9d50a294ca8141b73a75b557b",
+        "bench": "7d293825a6bc6963ef9856b63cd08f932ee91f76"
+      },
+      "driver_revision": "3179b64f9a1b37c9d50a294ca8141b73a75b557b",
+      "plan_sha256": "4b2a9808aa2f94be56b6e09b11ce2ac4cca90a7251a0f1648fc7f8ccf6094d10",
+      "primary_observation": "End-to-end ON QPS and P99 per predeclared adjacent A/B pair; also retain every P99.9/max and OFF result. Phase/call/byte improvements cannot substitute for end-to-end acceptance.",
+      "coverage_criteria": {
+        "measurement_min_seconds": 30,
+        "on_min_internal_completed_snapshots": 3,
+        "phase_means_require_shared_idle_endpoints": true,
+        "phase_means_require_no_failures": true,
+        "on_min_shared_idle_window_completed_snapshots": 3,
+        "idle_window_selection": "earliest and latest internal samples that are both snapshot_in_progress=false; no endpoint selection based on measured cost",
+        "coverage_failure_policy": "continue the predeclared remaining sequence; preserve raw client results and mark affected phase metrics unavailable/coverage_insufficient. Stop only on experiment failure/interruption."
+      },
+      "snapshot_accounting": {
+        "required_fields": [
+          "snapshot_capture_state_lock_acquisitions_total",
+          "snapshot_capture_state_lock_duration_ns_total",
+          "snapshot_capture_state_lock_duration_ns_max",
+          "snapshot_file_write_calls_total",
+          "snapshot_file_written_bytes_total",
+          "snapshot_file_installed_bytes_total",
+          "snapshot_compact_written_bytes_total"
+        ],
+        "keyspace": 100000,
+        "key_bytes": 588890,
+        "value_size": 1024,
+        "snapshot_header_bytes": 28,
+        "record_header_and_crc_bytes": 25,
+        "expected_complete_file_bytes": 105488918,
+        "cohort_checks": [
+          "All seven fields exist and are uint64 in every selected internal sample; check no decrease. Missing/null/invalid means this evidence is unavailable, not zero.",
+          "Same idle cohort with no failure: capture lock acquisitions delta equals completed snapshot count N; hold duration delta <= capture duration delta; hold mean divides by N.",
+          "Same idle cohort with no failure: snapshot installed bytes delta equals written bytes delta equals N * 105488918. Exclude initialization and preload via endpoint subtraction.",
+          "Report calls/N and written/calls without expecting exact calls, and compact bytes delta and bytes/N separately.",
+          "Record hold max absolute values at first/last internal samples and after/settled; do not subtract maxima to obtain a window maximum.",
+          "Cross-check the final installed file size/header separately after all measurements. Preserve any cohort mismatch and client results; do not select alternative windows."
+        ]
+      },
+      "decision_rule": {
+        "name": "repeat_negative_ON_direction",
+        "negative_pair": "Use raw elapsed_ns and raw latency_ns.p99: B.elapsed_ns > A.elapsed_ns AND B.p99 > A.p99; equal values do not count. Each valid case has the same 1500000 requests. No rounded ratios or later magnitude threshold.",
+        "trigger": "At least three of the four predeclared ON pairs are negative. Evaluate after all planned stages terminate; do not stop early because votes accumulate.",
+        "action": "Withdraw only the 64KiB output grouping from the main branch, retaining the seven counters, counted write_all, all tests and complete evidence; review and validate the resulting behavior and documentation.",
+        "incomplete_evidence": "Missing/failed/insufficient cases are not favorable votes. Fewer than four usable pairs means incomplete evidence and no passed acceptance. At least three observed negative pairs may justify conservative withdrawal even with incomplete remaining evidence, but never claim four completed pairs. New-counter unavailability must not remove a valid negative client vote.",
+        "limits": "This predeclared conservative engineering rule can react to small differences; it is not statistical significance or a causal claim. Non-trigger does not establish equivalence or no regression; all P99.9/max and other negative/correctness evidence still require inspection."
+      }
+    }
+  ],
+  "post_run_checks": {
+    "file": "POST_RUN_CHECKS.json",
+    "sha256": "3fee492ef3161b2fd703e390ba5ff67ef42a324609bcf776adf6a5bfa7f4099d",
+    "size_bytes": 18328,
+    "records": 16,
+    "artifact_kind": "post_run_derived_checks",
+    "included_in_raw_archive": false,
+    "full_record_payloads_verified": false
+  },
+  "source_reconstruction": {
+    "file": "unbuffered-control.patch",
+    "sha256": "881aba1073f51888b3b88a89351fc287bb58ec1c3ae784a486bba9e721f0aa00",
+    "size_bytes": 1884,
+    "base_revision": "3179b64f9a1b37c9d50a294ca8141b73a75b557b",
+    "original_A_runtime_revision": "1470c5fdd5f93cf85e099dc1e69dd1c24573f8b2",
+    "scope": "cpp_engine/engine.cpp only; git diff 3179b64 1470c5f, 5 insertions / 23 deletions. Retains counted write_all and seven metrics; removes only 64KiB output grouping.",
+    "included_in_raw_archive": false,
+    "rebuild_limitation": "Applying this patch to base revision reconstructs the A source difference, not the original executable bytes. Record the dirty patched source and newly built binary SHA; do not relabel the new runtime as the original frozen executable."
+  }
+}

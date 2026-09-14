@@ -1,6 +1,6 @@
 # 控制实验：快照写缓冲与端到端回退信号
 
-[返回 README](../README.md) · [扩大数据集的 pilot](performance-snapshot-pilot.md) · [实验程序](benchmark-experiments.md) · [指标口径](observability.md)
+[返回 README](../README.md) · [扩大数据集的 pilot](performance-snapshot-pilot.md) · [后续等口径计量对照](performance-snapshot-accounting.md) · [实验程序](benchmark-experiments.md) · [指标口径](observability.md)
 
 `bfeddf1` 为快照文件增加 64 KiB 有界写出缓冲。本次固定 100k key、1 KiB value 和同一组 Gateway / Benchmark 文件，以 A=`d2d5eb8`、B=`bfeddf1` 交错运行 16 轮。**四个 ON 配对的写出阶段都更短，B/A 中位数为 0.711779；但三个 ON 配对的 QPS、P99、P99.9 和最大延迟都更差，这是未解决的回退信号。**
 

@@ -164,7 +164,7 @@ make sanitize-test
 
 | 步骤 | 可复查的证据 | 设计判断 |
 | --- | --- | --- |
-| 建立基线并拆分等待指标 | [初始基线](docs/performance-baseline.md)、[指标口径](docs/observability.md#区分三种等待) | 区分排队、磁盘容量与提交确认 |
+| 建立基线并拆分等待指标 | [初始基线](docs/performance-baseline.md)、[指标口径](docs/observability.md#区分三种等待) | 区分排队、WAL 队列字节额度与提交确认 |
 | 改变参数，再检查返回对照 | [刷新间隔 2→1→2 ms](docs/performance-controls.md)、[20→40 数据线程](docs/performance-worker-controls.md) | 确认提交等待占用 worker 的成本 |
 | 实现异步确认，重跑旧版 | [18 轮版本对照及原始记录](docs/performance-async-controls.md) | 检查吞吐、尾延迟、排队与资源代价，同时回归语义 |
 
@@ -185,7 +185,9 @@ make sanitize-test
 
 throughput 的验证也保留了不确定的结果：[18 轮版本返回对照](docs/performance-throughput-controls.md)发现部分慢轮，随后以相同网关和压测器完成 [16 轮引擎交错对照](docs/performance-throughput-interleaved.md)，比较 `7d29382` 与简化后的 `d2d5eb8`。这两批每轮均为 500,000 请求，全部通过操作计数和 WAL 排空检查；交错对照未观察到一致的端到端收益，不能把减少无用线程与回调构造直接写成吞吐提升。
 
-[大数据集快照预实验](docs/performance-snapshot-pilot.md)推动了固定 64 KiB 写缓冲与部分写失败后的恢复验证。随后在 100k key、1 KiB value 下完成 [16 轮新旧引擎对照](docs/performance-snapshot-controls.md)：四个配对中，快照写出阶段均值都更短，新版/旧版耗时比的中位数约 **0.712**；但开启快照时，有 **3/4 配对的端到端 QPS 更低、P99 更高**。写出观测改善尚未转化为整体服务收益，端到端回退信号仍待定位，负向轮次及其限制也完整保留。
+[大数据集快照预实验](docs/performance-snapshot-pilot.md)推动了固定 64 KiB 写缓冲与部分写失败后的恢复验证。在 100k key、1 KiB value 下，[首轮 16 轮对照](docs/performance-snapshot-controls.md)观察到写出阶段变短，但开启快照时有 **3/4 配对的 QPS 更低、P99 更高**。
+
+[补齐相同指标后的 16 轮对照](docs/performance-snapshot-accounting.md)进一步确认：相同大小的快照文件，实际写调用从每次 **100,001 降到 1,613**，四个配对的写出耗时比中位数约 **0.682**。本轮有 **2/4 配对的 QPS 更低、P99 更高**，缓冲版还出现 **283.851 ms** 的最大延迟；未触发预声明的撤销规则，也没有通过整体性能验收。缓冲保留为局部候选，负向结果完整归档。实际捕获持锁均值仍约 **57–68 ms**，是后续需要处理的暂停来源。
 
 ### 自己运行并核对结果
 
@@ -200,6 +202,8 @@ python3 benmark/summarize.py /tmp/minikv-readme-experiment
 
 汇总会核对配置、操作计数、WAL 序列与采样区间，保留失败、缺失和中断轮次，并支持文本、JSON 与 CSV。负载由 seed 和请求编号确定，改变并发数不改变请求内容集合。完整参数、产物和证据不足时的处理见[自动化性能实验](docs/benchmark-experiments.md)；连接已有服务的单次压测见[测试指南](docs/testing.md#运行一次可复现的压测)。
 
+快照阶段与持锁指标还可通过[离线复查命令](docs/benchmark-experiments.md#离线复查快照阶段与持锁)从归档重算：保留共同采样窗口和原始差值，区分字段缺失、真实零值与观测不足。
+
 ## 后续路线
 
 后续以可测量的单机问题为主，每个方向先明确验收条件，再扩展实现。
@@ -207,7 +211,7 @@ python3 benmark/summarize.py /tmp/minikv-readme-experiment
 | 优先级 | 方向 | 验收条件 |
 | --- | --- | --- |
 | P1 | 扩大异步确认的负载验证 | 在已有交错对照基础上延长运行，加入慢盘、过载和固定到达率负载，联合检查失败率、P99、请求名额与内存 |
-| P2 | 定位快照缓冲对照中的端到端回退信号 | 为新旧版本补齐相同的捕获临界区与写入量指标，再对照尾延迟、吞吐、内存和 WAL 积压；若负向趋势复现，回退改动或明确接受的代价 |
+| P2 | 缩短快照捕获持锁，继续验证写缓冲的取舍 | 使用已有的临界区与写入量指标评估状态副本方案，同时覆盖快照开关、短 value 与频繁覆盖写入；联合检查尾延迟、吞吐和内存，局部阶段变快仍需通过端到端验收 |
 | P3 | 评估分段 WAL 与回收方案 | 以 P2 为依据比较实现；给出空间与暂停时间收益，并通过现有故障注入和恢复检查 |
 
 ## 文档与源码导航
