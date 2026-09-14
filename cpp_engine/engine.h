@@ -15,7 +15,7 @@ namespace minikv {
 constexpr uint32_t kMaxKeySize = 4096;
 constexpr uint32_t kMaxValueSize = 1024 * 1024;
 
-enum class Operation : uint8_t { Put = 1, Get = 2, Delete = 3 };
+enum class Operation : uint8_t { Put = 1, Get = 2, Delete = 3, Stats = 4 };
 enum class Status : uint8_t { Ok = 0, Value = 1, NotFound = 2, Invalid = 3, IOError = 4, Busy = 5 };
 enum class WalMode { Throughput, Reliable };
 
@@ -43,6 +43,32 @@ struct EngineConfig {
     bool import_legacy = false;
 };
 
+// One state-lock snapshot. Counters reset on restart; sequences are recovered.
+// Duration counters include failed attempts and use monotonic nanoseconds.
+struct EngineStats {
+    WalMode wal_mode = WalMode::Throughput;
+    uint64_t keys = 0;
+    uint64_t applied_sequence = 0;
+    uint64_t durable_sequence = 0;
+    uint64_t wal_pending_bytes = 0;
+    uint64_t wal_inflight_bytes = 0;
+    uint64_t wal_queued_records = 0;
+    uint64_t wal_queue_capacity_bytes = 0;
+    uint64_t wal_commits_total = 0;
+    uint64_t wal_commit_failures_total = 0;
+    uint64_t wal_commit_duration_ns_total = 0;
+    uint64_t wal_commit_last_duration_ns = 0;
+    uint64_t snapshot_successes_total = 0;
+    uint64_t snapshot_failures_total = 0;
+    bool snapshot_in_progress = false;
+    uint64_t snapshot_sequence = 0;
+    uint64_t snapshot_capture_duration_ns_total = 0;
+    uint64_t snapshot_write_duration_ns_total = 0;
+    uint64_t snapshot_compact_duration_ns_total = 0;
+    bool io_failed = false;
+    bool stopping = false;
+};
+
 class Engine {
 public:
     explicit Engine(EngineConfig config);
@@ -54,6 +80,7 @@ public:
     void snapshot();
     void close();
     uint64_t durable_sequence() const;
+    EngineStats stats() const;
 
 private:
     struct PendingRecord {
@@ -93,6 +120,7 @@ private:
     size_t pending_bytes_ = 0; // Queued plus in-flight, not-yet-synced WAL bytes.
     uint64_t applied_sequence_ = 0;
     uint64_t durable_sequence_ = 0;
+    EngineStats stats_;
     int wal_fd_ = -1;
     int lock_fd_ = -1;
     bool stopping_ = false;

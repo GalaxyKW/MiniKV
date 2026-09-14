@@ -154,6 +154,120 @@ class MiniKVIntegration(unittest.TestCase):
     def rpc_socket(self):
         return socket.create_connection(("127.0.0.1", self.engine_port), timeout=3)
 
+    def runtime_stats(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.http_port, timeout=4)
+        try:
+            connection.request("GET", "/stats")
+            response = connection.getresponse()
+            self.assertEqual(response.getheader("Content-Type"), "application/json")
+            self.assertEqual(response.getheader("Cache-Control"), "no-store")
+            return response.status, json.loads(response.read())
+        finally:
+            connection.close()
+
+    def test_runtime_stats_and_recovery(self):
+        self.assertEqual(self.request("POST", "private-key", "private-value"), (200, b"OK\n"))
+        self.assertEqual(self.request("GET", "private-key"), (200, b"VALUE private-value\n"))
+        code, stats = self.runtime_stats()
+        self.assertEqual(code, 200)
+        self.assertEqual(stats["schema_version"], 1)
+        self.assertEqual(stats["engine"]["keys"], 1)
+        self.assertEqual(stats["engine"]["wal_mode"], "reliable")
+        self.assertEqual(stats["engine"]["applied_sequence"], 1)
+        self.assertEqual(stats["engine"]["durable_sequence"], 1)
+        self.assertEqual(stats["engine"]["wal_pending_bytes"], 0)
+        self.assertGreaterEqual(stats["engine"]["wal_commits_total"], 1)
+        self.assertFalse(stats["engine"]["io_failed"])
+        self.assertEqual(stats["server"]["workers_capacity"], 2)
+        self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 2)
+        self.assertEqual(stats["gateway"]["rpc"]["errors_total"], 0)
+        self.assertEqual(stats["gateway"]["rpc"]["pool_capacity"], 16)
+        self.assertNotIn("private-key", json.dumps(stats))
+        self.assertNotIn("private-value", json.dumps(stats))
+        self.assertNotIn(self.directory.name, json.dumps(stats))
+        # The Stats operation is a framed read: it must preserve pipelining and
+        # must not enter the WAL or accept key/value payloads.
+        with self.rpc_socket() as sock:
+            sock.sendall(frame(4, b"") + frame(2, b"private-key"))
+            status, payload = read_response(sock)
+            self.assertEqual(status, 1)
+            self.assertEqual(json.loads(payload)["engine"]["applied_sequence"], 1)
+            self.assertEqual(read_response(sock), (1, b"private-value"))
+        with self.rpc_socket() as sock:
+            sock.sendall(frame(4, b"private-key"))
+            self.assertEqual(read_response(sock)[0], 3)
+        self.stop("engine", kill=True)
+        code, unavailable = self.runtime_stats()
+        self.assertEqual(code, 503)
+        self.assertEqual(unavailable["error"], "backend_unavailable")
+        self.assertNotIn("engine", unavailable)
+        self.assertEqual(unavailable["gateway"]["rpc"]["calls_total"], 2)
+        self.start_engine()
+        code, recovered = self.runtime_stats()
+        self.assertEqual(code, 200)
+        self.assertEqual(recovered["engine"]["keys"], 1)
+        self.assertEqual(recovered["engine"]["durable_sequence"], 1)
+        self.assertEqual(recovered["engine"]["wal_commits_total"], 0)
+        self.assertEqual(recovered["gateway"]["rpc"]["calls_total"], 2)
+
+    def test_stats_progress_while_data_workers_and_rpc_pool_wait(self):
+        self.stop("gateway")
+        self.stop("engine")
+        self.engine_env.update({"MINIKV_WORKERS": "1", "MINIKV_REQUEST_QUEUE_SIZE": "1",
+                                "MINIKV_WAL_FLUSH_MS": "3000", "MINIKV_SNAPSHOT_INTERVAL_MS": "0"})
+        self.gateway_env.update({"MINIKV_RPC_POOL_SIZE": "1", "MINIKV_RPC_TIMEOUT_MS": "5000"})
+        self.start_engine()
+        self.start_gateway()
+        results = []
+
+        def write():
+            try:
+                results.append(self.request("POST", "waiting", "durable"))
+            except Exception as error:
+                results.append(error)
+
+        writer = threading.Thread(target=write)
+        writer.start()
+        try:
+            deadline = time.monotonic() + 2
+            while True:
+                code, stats = self.runtime_stats()
+                self.assertEqual(code, 200)
+                if stats["engine"]["applied_sequence"] == 1:
+                    break
+                self.assertLess(time.monotonic(), deadline, "write was not admitted")
+                time.sleep(0.005)
+            self.assertEqual(stats["engine"]["durable_sequence"], 0)
+            self.assertGreater(stats["engine"]["wal_pending_bytes"], 0)
+            self.assertEqual(stats["server"]["workers_active"], 1)
+            self.assertEqual(stats["gateway"]["rpc"]["pool_in_use"], 1)
+            with self.rpc_socket() as queued, self.rpc_socket() as rejected:
+                queued.sendall(frame(2, b"waiting"))
+                while True:
+                    code, stats = self.runtime_stats()
+                    self.assertEqual(code, 200)
+                    if stats["server"]["request_queue_depth"] == 1:
+                        break
+                    self.assertLess(time.monotonic(), deadline, "read was not queued")
+                    time.sleep(0.005)
+                rejected.sendall(frame(2, b"waiting"))
+                self.assertEqual(read_response(rejected)[0], 5)
+                code, stats = self.runtime_stats()
+                self.assertEqual(code, 200)
+                self.assertGreaterEqual(stats["server"]["requests_rejected_total"], 1)
+                self.assertEqual(stats["engine"]["durable_sequence"], 0)
+                self.assertEqual(results, [], "data write completed before Stats sampled its wait")
+                queued.settimeout(5)
+                self.assertEqual(read_response(queued), (1, b"durable"))
+        finally:
+            writer.join(timeout=6)
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(results, [(200, b"OK\n")])
+        code, stats = self.runtime_stats()
+        self.assertEqual(code, 200)
+        self.assertEqual(stats["engine"]["durable_sequence"], 1)
+        self.assertEqual(stats["engine"]["wal_pending_bytes"], 0)
+
     def test_binary_values_snapshot_and_restart(self):
         key = "tenant:1 \n\x00"
         value = " \n中文\x00\tline1\nDEL victim\n "

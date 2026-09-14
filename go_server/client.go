@@ -17,6 +17,7 @@ const (
 	opPut        = 1
 	opGet        = 2
 	opDelete     = 3
+	opStats      = 4
 	statusOK     = 0
 	statusValue  = 1
 	statusMiss   = 2
@@ -43,6 +44,7 @@ type rpcConn struct {
 }
 
 type rpcClient struct {
+	metrics     rpcMetrics
 	mu          sync.Mutex
 	closed      bool
 	connections map[*rpcConn]struct{}
@@ -69,13 +71,23 @@ func newRPCClient(address string, size int, timeout time.Duration) *rpcClient {
 	}
 }
 
-func (c *rpcClient) acquire(ctx context.Context) (*rpcConn, error) {
+func (c *rpcClient) acquireSlot(ctx context.Context) error {
+	started := time.Now()
+	c.metrics.poolAcquires.Add(1)
+	defer func() { c.metrics.poolWaitNS.Add(uint64(time.Since(started))) }()
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return ctx.Err()
 	case <-c.done:
-		return nil, errClientClosed
+		return errClientClosed
 	case c.slots <- struct{}{}:
+		return nil
+	}
+}
+
+func (c *rpcClient) acquire(ctx context.Context) (*rpcConn, error) {
+	if err := c.acquireSlot(ctx); err != nil {
+		return nil, err
 	}
 	// A slot covers both dialing and an in-flight RPC, so idle + active
 	// connections can never exceed the configured capacity.
@@ -153,12 +165,25 @@ func (c *rpcClient) Close() {
 		_ = conn.Close()
 		delete(c.connections, conn)
 	}
+	// Closed connections are no longer reusable and must not remain reported as
+	// idle. Active borrowers still release their own slots when they finish.
+	for {
+		select {
+		case <-c.idle:
+		default:
+			return
+		}
+	}
 }
 
 func encodeRequest(request rpcRequest) ([]byte, error) {
-	if len(request.key) == 0 || len(request.key) > maxKeySize || len(request.value) > maxValueSize ||
-		(request.op != opPut && request.op != opGet && request.op != opDelete) ||
-		(request.op != opPut && request.value != "") {
+	valid := request.op == opStats && request.key == "" && request.value == ""
+	if request.op != opStats {
+		valid = len(request.key) > 0 && len(request.key) <= maxKeySize && len(request.value) <= maxValueSize &&
+			(request.op == opPut || request.op == opGet || request.op == opDelete) &&
+			(request.op == opPut || request.value == "")
+	}
+	if !valid {
 		return nil, errors.New("invalid RPC operation or key/value length")
 	}
 	bytes := make([]byte, 16+len(request.key)+len(request.value))
@@ -207,6 +232,14 @@ func (c *rpcClient) exchange(ctx context.Context, bytes []byte) (response rpcRes
 	if err != nil {
 		return rpcResponse{}, err
 	}
+	started := time.Now()
+	c.metrics.exchanges.Add(1)
+	defer func() {
+		c.metrics.exchangeNS.Add(uint64(time.Since(started)))
+		if err != nil {
+			c.metrics.exchangeErrors.Add(1)
+		}
+	}()
 	healthy := false
 	deadline, _ := ctx.Deadline()
 	if err := conn.SetDeadline(deadline); err != nil {
@@ -245,7 +278,13 @@ func (c *rpcClient) exchange(ctx context.Context, bytes []byte) (response rpcRes
 	return response, err
 }
 
-func (c *rpcClient) execute(parent context.Context, request rpcRequest) (rpcResponse, error) {
+func (c *rpcClient) execute(parent context.Context, request rpcRequest) (result rpcResponse, resultErr error) {
+	c.metrics.calls.Add(1)
+	defer func() {
+		if resultErr != nil {
+			c.metrics.errors.Add(1)
+		}
+	}()
 	bytes, err := encodeRequest(request)
 	if err != nil {
 		return rpcResponse{}, err
@@ -255,8 +294,9 @@ func (c *rpcClient) execute(parent context.Context, request rpcRequest) (rpcResp
 	response, err := c.exchange(ctx, bytes)
 	// Replaying a timed-out write can overwrite a newer value or repeat a
 	// deletion. Only reads may retry, within the original request deadline.
-	if err != nil && request.op == opGet && ctx.Err() == nil &&
+	if err != nil && (request.op == opGet || request.op == opStats) && ctx.Err() == nil &&
 		!errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, errClientClosed) {
+		c.metrics.retries.Add(1)
 		response, err = c.exchange(ctx, bytes)
 	}
 	if err != nil {

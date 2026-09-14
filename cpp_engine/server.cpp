@@ -11,6 +11,7 @@
 #include <cstring>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -103,6 +104,7 @@ public:
     ~Server() {
         // Finish accepted tasks before closing the completion eventfd or engine.
         pool_.shutdown();
+        stats_pool_.shutdown();
         release();
     }
 
@@ -140,6 +142,7 @@ public:
         // work must still finish before main() flushes and closes the engine.
         while (!clients_.empty()) close_client(clients_.begin()->first);
         pool_.shutdown();
+        stats_pool_.shutdown();
     }
 
 private:
@@ -181,6 +184,7 @@ private:
         if (it->second.registered) ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, it->second.fd, nullptr);
         ::close(it->second.fd);
         clients_.erase(it);
+        connections_.fetch_sub(1, std::memory_order_relaxed);
     }
 
     void accept_clients() {
@@ -192,9 +196,14 @@ private:
                 if (errno != EAGAIN && errno != EWOULDBLOCK) std::cerr << "accept: " << std::strerror(errno) << '\n';
                 return;
             }
-            if (clients_.size() >= max_connections_) { ::close(fd); continue; }
+            if (clients_.size() >= max_connections_) {
+                connections_rejected_.fetch_add(1, std::memory_order_relaxed);
+                ::close(fd);
+                continue;
+            }
             const uint64_t id = next_id_++;
             clients_.emplace(id, Client{fd, {}, {}});
+            connections_.fetch_add(1, std::memory_order_relaxed);
             arm(id, EPOLLIN);
         }
     }
@@ -223,9 +232,14 @@ private:
             return true;
         }
         client.input.erase(0, size);
-        const bool admitted = pool_.enqueue([this, id, request = std::move(request)] {
+        const bool stats_request = request.operation == Operation::Stats;
+        auto& target_pool = stats_request ? stats_pool_ : pool_;
+        const bool admitted = target_pool.enqueue([this, id, request = std::move(request)] {
             Response response;
-            try { response = engine_.execute(request); }
+            try {
+                response = request.operation == Operation::Stats
+                    ? Response{Status::Value, stats_json()} : engine_.execute(request);
+            }
             catch (const std::exception& error) { response = {Status::IOError, error.what()}; }
             {
                 std::lock_guard<std::mutex> lock(completion_mutex_);
@@ -235,6 +249,7 @@ private:
             while (::write(completed_fd_, &one, sizeof(one)) < 0 && errno == EINTR) {}
         });
         if (!admitted) {
+            if (!stats_request) requests_rejected_.fetch_add(1, std::memory_order_relaxed);
             respond(id, {Status::Busy, "request queue is full"});
             return true;
         }
@@ -307,9 +322,51 @@ private:
         }
     }
 
+    std::string stats_json() const {
+        // Sample independently, never nest pool/state locks or touch reactor-
+        // owned containers from a worker. No paths, errors or user data escape.
+        const auto engine = engine_.stats();
+        const auto pool = pool_.stats();
+        std::ostringstream out;
+        out << std::boolalpha << "{\"schema_version\":1,\"engine\":{\"wal_mode\":\""
+            << (engine.wal_mode == WalMode::Reliable ? "reliable" : "throughput") << '"';
+        const auto field = [&](const char* name, auto value) { out << ",\"" << name << "\":" << value; };
+        field("keys", engine.keys);
+        field("applied_sequence", engine.applied_sequence);
+        field("durable_sequence", engine.durable_sequence);
+        field("wal_pending_bytes", engine.wal_pending_bytes);
+        field("wal_inflight_bytes", engine.wal_inflight_bytes);
+        field("wal_queued_records", engine.wal_queued_records);
+        field("wal_queue_capacity_bytes", engine.wal_queue_capacity_bytes);
+        field("wal_commits_total", engine.wal_commits_total);
+        field("wal_commit_failures_total", engine.wal_commit_failures_total);
+        field("wal_commit_duration_ns_total", engine.wal_commit_duration_ns_total);
+        field("wal_commit_last_duration_ns", engine.wal_commit_last_duration_ns);
+        field("snapshot_successes_total", engine.snapshot_successes_total);
+        field("snapshot_failures_total", engine.snapshot_failures_total);
+        field("snapshot_in_progress", engine.snapshot_in_progress);
+        field("snapshot_sequence", engine.snapshot_sequence);
+        field("snapshot_capture_duration_ns_total", engine.snapshot_capture_duration_ns_total);
+        field("snapshot_write_duration_ns_total", engine.snapshot_write_duration_ns_total);
+        field("snapshot_compact_duration_ns_total", engine.snapshot_compact_duration_ns_total);
+        field("io_failed", engine.io_failed);
+        field("stopping", engine.stopping);
+        out << "},\"server\":{\"connections\":" << connections_.load(std::memory_order_relaxed);
+        field("connection_capacity", max_connections_);
+        field("request_queue_depth", pool.queued);
+        field("request_queue_capacity", pool.capacity);
+        field("workers_active", pool.active);
+        field("workers_capacity", pool.workers);
+        field("requests_rejected_total", requests_rejected_.load(std::memory_order_relaxed));
+        field("connections_rejected_total", connections_rejected_.load(std::memory_order_relaxed));
+        out << "}}";
+        return out.str();
+    }
+
     void release() noexcept {
         for (const auto& entry : clients_) ::close(entry.second.fd);
         clients_.clear();
+        connections_.store(0, std::memory_order_relaxed);
         if (listen_fd_ >= 0) { ::close(listen_fd_); listen_fd_ = -1; }
         if (completed_fd_ >= 0) { ::close(completed_fd_); completed_fd_ = -1; }
         if (epoll_fd_ >= 0) { ::close(epoll_fd_); epoll_fd_ = -1; }
@@ -317,6 +374,8 @@ private:
 
     Engine& engine_;
     ThreadPool pool_;
+    // A bounded control query can run while every data worker awaits WAL sync.
+    ThreadPool stats_pool_{1, 1};
     size_t max_connections_;
     std::chrono::milliseconds idle_timeout_;
     bool draining_ = false;
@@ -324,6 +383,9 @@ private:
     int listen_fd_ = -1, completed_fd_ = -1, epoll_fd_ = -1;
     uint64_t next_id_ = 3;
     std::unordered_map<uint64_t, Client> clients_;
+    std::atomic<uint64_t> connections_{0};
+    std::atomic<uint64_t> requests_rejected_{0};
+    std::atomic<uint64_t> connections_rejected_{0};
     std::mutex completion_mutex_;
     std::vector<Completion> completions_;
 };

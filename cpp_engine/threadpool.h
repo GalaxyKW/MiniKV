@@ -11,6 +11,13 @@ namespace minikv {
 
 class ThreadPool {
 public:
+    struct Stats {
+        size_t queued;
+        size_t capacity;
+        size_t active;
+        size_t workers;
+    };
+
     ThreadPool(size_t workers, size_t capacity) : capacity_(capacity) {
         try {
             for (size_t i = 0; i < workers; ++i) {
@@ -23,8 +30,13 @@ public:
                             if (tasks_.empty()) return;
                             task = std::move(tasks_.front());
                             tasks_.pop();
+                            ++active_;
                         }
                         task();
+                        {
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            --active_;
+                        }
                     }
                 });
             }
@@ -44,6 +56,11 @@ public:
         return true;
     }
 
+    Stats stats() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return {tasks_.size(), capacity_, active_, workers_.size()};
+    }
+
     void shutdown() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -55,8 +72,9 @@ public:
 
 private:
     size_t capacity_;
+    size_t active_ = 0;
     bool stopping_ = false;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable ready_;
     std::queue<std::function<void()>> tasks_;
     std::vector<std::thread> workers_;

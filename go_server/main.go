@@ -145,8 +145,13 @@ func run() error {
 	}
 	client := newRPCClient(envString("MINIKV_ENGINE_ADDR", "127.0.0.1:9090"), size, time.Duration(timeoutMS)*time.Millisecond)
 	defer client.Close()
+	// A separate bounded connection lets runtime inspection proceed while every
+	// data RPC slot is waiting for WAL durability.
+	statsClient := newRPCClient(envString("MINIKV_ENGINE_ADDR", "127.0.0.1:9090"), 1, time.Duration(timeoutMS)*time.Millisecond)
+	defer statsClient.Close()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/kv", newKVHandler(client))
+	mux.HandleFunc("/stats", newStatsHandler(statsClient, client, time.Now()))
 	server := &http.Server{
 		Addr:              envString("MINIKV_HTTP_ADDR", ":8080"),
 		Handler:           mux,

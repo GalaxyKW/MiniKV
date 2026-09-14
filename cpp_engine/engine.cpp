@@ -19,6 +19,25 @@
 namespace minikv {
 namespace {
 
+using StatsClock = std::chrono::steady_clock;
+
+uint64_t elapsed_ns(StatsClock::time_point start) {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(StatsClock::now() - start).count());
+}
+
+// Declare outside all state-lock scopes. Accounting must not wait for I/O and
+// must still run when a phase throws, without replacing the original failure.
+struct TimedStage {
+    std::mutex& mutex;
+    uint64_t& counter;
+    StatsClock::time_point start = StatsClock::now();
+    ~TimedStage() {
+        const auto elapsed = elapsed_ns(start);
+        std::lock_guard<std::mutex> lock(mutex);
+        counter += elapsed;
+    }
+};
+
 struct File {
     int fd;
     explicit File(int value) : fd(value) {}
@@ -173,6 +192,7 @@ void Engine::load_snapshot() {
         throw std::runtime_error("corrupt snapshot header");
     }
     applied_sequence_ = codec::u64(header, 8);
+    stats_.snapshot_sequence = applied_sequence_;
     const uint64_t count = codec::u64(header, 16);
     struct stat metadata{};
     if (::fstat(file.fd, &metadata) != 0) io_error("stat snapshot");
@@ -334,14 +354,25 @@ void Engine::write_batch(const std::deque<PendingRecord>& records) {
 // Caller owns io_mutex_, so no other batch can advance the commit point.
 void Engine::commit_batch(const std::deque<PendingRecord>& records, size_t bytes) {
     if (records.empty()) return;
+    const auto started = StatsClock::now();
     try {
         write_batch(records);
+        const auto elapsed = elapsed_ns(started);
         std::lock_guard<std::mutex> lock(mutex_);
         durable_sequence_ = records.back().sequence;
         pending_bytes_ -= bytes;
+        stats_.wal_inflight_bytes = 0;
+        ++stats_.wal_commits_total;
+        stats_.wal_commit_duration_ns_total += elapsed;
+        stats_.wal_commit_last_duration_ns = elapsed;
         committed_.notify_all();
     } catch (const std::exception& error) {
+        const auto elapsed = elapsed_ns(started);
         std::lock_guard<std::mutex> lock(mutex_);
+        stats_.wal_inflight_bytes = 0;
+        ++stats_.wal_commit_failures_total;
+        stats_.wal_commit_duration_ns_total += elapsed;
+        stats_.wal_commit_last_duration_ns = elapsed;
         fail_locked(error.what());
         throw;
     }
@@ -358,6 +389,7 @@ void Engine::flush_pending() {
             if (pending_.empty()) return;
             batch.swap(pending_);
             batch_bytes = pending_bytes_;
+            stats_.wal_inflight_bytes = batch_bytes;
         }
         // New operations may enter pending_ while this batch is being written.
         // Its bytes stay charged until sync succeeds, maintaining backpressure.
@@ -371,13 +403,25 @@ void Engine::flush_pending() {
 
 void Engine::flush_locked() {
     if (pending_.empty()) return;
+    const auto started = StatsClock::now();
+    stats_.wal_inflight_bytes = pending_bytes_;
     try {
         write_batch(pending_);
+        const auto elapsed = elapsed_ns(started);
         durable_sequence_ = pending_.back().sequence;
         pending_.clear();
         pending_bytes_ = 0;
+        stats_.wal_inflight_bytes = 0;
+        ++stats_.wal_commits_total;
+        stats_.wal_commit_duration_ns_total += elapsed;
+        stats_.wal_commit_last_duration_ns = elapsed;
         committed_.notify_all();
     } catch (const std::exception& error) {
+        const auto elapsed = elapsed_ns(started);
+        stats_.wal_inflight_bytes = 0;
+        ++stats_.wal_commit_failures_total;
+        stats_.wal_commit_duration_ns_total += elapsed;
+        stats_.wal_commit_last_duration_ns = elapsed;
         fail_locked(error.what());
         throw;
     }
@@ -447,42 +491,70 @@ void Engine::compact_wal(int64_t boundary) {
 
 void Engine::snapshot() {
     std::lock_guard<std::mutex> snapshot_lock(snapshot_mutex_);
-    std::unique_lock<std::mutex> io_lock(io_mutex_);
-    std::unordered_map<std::string, std::string> image;
-    std::deque<PendingRecord> batch;
-    size_t batch_bytes;
-    uint64_t sequence;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (stopping_) throw std::runtime_error("engine is stopping");
         if (!failure_.empty()) throw std::runtime_error(failure_);
-        // Copy before detaching: an allocation failure leaves the queue intact.
-        image = kv_;
-        sequence = applied_sequence_;
-        batch.swap(pending_);
-        batch_bytes = pending_bytes_;
+        stats_.snapshot_in_progress = true;
     }
-    commit_batch(batch, batch_bytes);
-    const off_t boundary = ::lseek(wal_fd_, 0, SEEK_END);
-    if (boundary < 0) io_error("seek WAL checkpoint boundary");
-    io_lock.unlock();
-    batch.clear();
-    install_snapshot(image, sequence);
-    io_lock.lock();
-    {
+    try {
+        std::unique_lock<std::mutex> io_lock(io_mutex_, std::defer_lock);
+        std::unordered_map<std::string, std::string> image;
+        std::deque<PendingRecord> batch;
+        size_t batch_bytes;
+        uint64_t sequence;
+        off_t boundary;
+        {
+            TimedStage timer{mutex_, stats_.snapshot_capture_duration_ns_total};
+            io_lock.lock();
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (stopping_) throw std::runtime_error("engine is stopping");
+                if (!failure_.empty()) throw std::runtime_error(failure_);
+                // Copy before detaching: an allocation failure leaves the queue intact.
+                image = kv_;
+                sequence = applied_sequence_;
+                batch.swap(pending_);
+                batch_bytes = pending_bytes_;
+                stats_.wal_inflight_bytes = batch_bytes;
+            }
+            commit_batch(batch, batch_bytes);
+            boundary = ::lseek(wal_fd_, 0, SEEK_END);
+            if (boundary < 0) io_error("seek WAL checkpoint boundary");
+            io_lock.unlock();
+        }
+        batch.clear();
+        {
+            TimedStage timer{mutex_, stats_.snapshot_write_duration_ns_total};
+            install_snapshot(image, sequence);
+        }
+        {
+            TimedStage timer{mutex_, stats_.snapshot_compact_duration_ns_total};
+            io_lock.lock();
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (!failure_.empty()) throw std::runtime_error(failure_);
+            }
+            compact_wal(boundary);
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                // A WAL commit during snapshot installation may be newer.
+                durable_sequence_ = std::max(durable_sequence_, sequence);
+                committed_.notify_all();
+            }
+            io_lock.unlock();
+        }
+        // Destroying a large image also happens outside the I/O and state locks.
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!failure_.empty()) throw std::runtime_error(failure_);
-    }
-    compact_wal(boundary);
-    {
+        stats_.snapshot_sequence = sequence;
+        stats_.snapshot_in_progress = false;
+        ++stats_.snapshot_successes_total;
+    } catch (...) {
         std::lock_guard<std::mutex> lock(mutex_);
-        // Legacy import can contain snapshot-only state. Never rewind a newer
-        // WAL commit made while the snapshot was being written.
-        durable_sequence_ = std::max(durable_sequence_, sequence);
-        committed_.notify_all();
+        stats_.snapshot_in_progress = false;
+        ++stats_.snapshot_failures_total;
+        throw;
     }
-    // Destroying a large captured map should not pause the WAL writer either.
-    io_lock.unlock();
 }
 
 void Engine::background_work() {
@@ -521,6 +593,21 @@ void Engine::background_snapshots() {
 uint64_t Engine::durable_sequence() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return durable_sequence_;
+}
+
+EngineStats Engine::stats() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto result = stats_;
+    result.wal_mode = config_.wal_mode;
+    result.keys = kv_.size();
+    result.applied_sequence = applied_sequence_;
+    result.durable_sequence = durable_sequence_;
+    result.wal_pending_bytes = pending_bytes_;
+    result.wal_queued_records = pending_.size();
+    result.wal_queue_capacity_bytes = config_.wal_queue_bytes;
+    result.io_failed = !failure_.empty();
+    result.stopping = stopping_;
+    return result;
 }
 
 void Engine::close() {

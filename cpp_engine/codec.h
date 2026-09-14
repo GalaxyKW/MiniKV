@@ -45,6 +45,8 @@ inline uint32_t crc32(std::string_view bytes) {
 }
 
 inline bool valid_request(const Request& request) {
+    // Engine::execute handles only KV operations. Stats is dispatched by the
+    // server and must never reach the mutation path or persistent record codec.
     return !request.key.empty() && request.key.size() <= kMaxKeySize &&
            request.value.size() <= kMaxValueSize &&
            (request.operation == Operation::Put ||
@@ -60,6 +62,10 @@ inline size_t request_size(std::string_view header) {
     }
     const auto op = static_cast<Operation>(header[4]);
     const uint32_t key_size = u32(header, 8), value_size = u32(header, 12);
+    if (op == Operation::Stats) {
+        if (key_size != 0 || value_size != 0) throw std::runtime_error("stats request must have no payload");
+        return kRequestHeader;
+    }
     if (key_size == 0 || key_size > kMaxKeySize || value_size > kMaxValueSize ||
         (op != Operation::Put && op != Operation::Get && op != Operation::Delete) ||
         (op != Operation::Put && value_size != 0)) {
@@ -88,6 +94,7 @@ inline std::string response(const Response& result) {
 constexpr size_t kRecordHeader = 21;
 
 inline std::string record(uint64_t sequence, Operation op, const std::string& key, const std::string& value) {
+    if (op != Operation::Put && op != Operation::Delete) throw std::runtime_error("invalid persistent operation");
     std::string bytes = "MKL1";
     bytes.push_back(static_cast<char>(op));
     append_u64(bytes, sequence);

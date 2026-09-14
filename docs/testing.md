@@ -11,8 +11,8 @@ make sanitize-test
 
 | 命令 | 实际执行内容 |
 | --- | --- |
-| `make test` | 构建 C++ 引擎、Go 网关与压测工具；运行两个 C++ 测试程序、`go test -race -timeout 60s ./...` 和 Python 端到端测试 |
-| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及两个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
+| `make test` | 构建 C++ 引擎、Go 网关与压测工具；运行三个 C++ 测试程序、`go test -race -timeout 60s ./...` 和 Python 端到端测试 |
+| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及三个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
 
@@ -29,8 +29,11 @@ make sanitize-test
 | 快照并发 | 快照文件写盘期间可靠读写继续完成；快照捕获固定版本；自动快照、多个快照串行执行、关闭等待快照、WAL 替换保留后续写入 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 故障边界 | WAL/快照 I/O 故障注入、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | HTTP 与 RPC | 参数与状态码映射、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
-| 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理 | [main_test.go](../benmark/main_test.go) |
+| 运行状态 | WAL 队列与写盘批次区分、提交和快照失败计数、重启归零、RPC 等待与重试统计；状态查询不泄漏用户数据 | [stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
+| 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理；并发聚合中成功、失败、未命中与网络错误的计数守恒 | [main_test.go](../benmark/main_test.go) |
 | 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、1 MiB value、客户端 RST、非法帧、队列过载、停机响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
+
+端到端测试还验证数据 worker、数据队列和网关 RPC 名额被占用时，`/stats` 仍可返回；引擎退出后可继续获取网关统计，重启后可读取恢复序列。
 
 这些检查分别验证具体并发交错、错误处理和恢复边界。进程退出测试不等同于真实断电测试；文件同步的持久性仍依赖操作系统、文件系统和设备履行 `fdatasync/fsync` 约定。已有回归检查也不代表已经测得性能提升。
 
@@ -53,11 +56,11 @@ ThreadSanitizer 使用独立构建目录，与 ASan/UBSan 检查分开运行：
 cmake -S cpp_engine -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
   '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
   -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
-cmake --build build-tsan --target engine_test snapshot_test -j2
+cmake --build build-tsan --target engine_test snapshot_test stats_test -j2
 TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
 ```
 
-该命令覆盖存储和快照两个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
+该命令覆盖存储、快照和运行状态三个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
 
 如果 TSan 在测试启动前报告 `unexpected memory mapping`，在支持 `setarch` 的 x86_64 Linux 环境中，可以仅对本次测试进程及其子进程关闭地址随机化后重试：
 
@@ -81,7 +84,7 @@ setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 \
   -value-size 128 -seed 1 -timeout 2s
 ```
 
-这会先预热整个 key 空间，再运行 PUT/GET/DELETE 混合负载。预热耗时不计入压测总耗时。`-preload` 默认开启，只对 `get` 和 `mixed` 生效；混合负载中的 DELETE 会改变后续命中率，预热所有 key 并不代表全程命中。
+这会先预置整个 key 空间，再运行 PUT/GET/DELETE 混合负载。工具称为“预热”的这一步用于写入数据，不保证所有并发连接已建立或待提交 WAL 已同步；短实验可能包含这些启动成本。预置耗时不计入压测总耗时。`-preload` 默认开启，只对 `get` 和 `mixed` 生效；混合负载中的 DELETE 会改变后续命中率，预置所有 key 并不代表全程命中。
 
 如果需要测量当前数据集而不预热，显式使用 Go 布尔参数写法 `-preload=false`：
 
@@ -116,6 +119,8 @@ setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 \
 
 报告还列出 HTTP 状态码分布。工具会同时检查状态码和响应正文；预热失败或测量中存在系统失败时以非零状态退出，正常未命中本身不会导致失败退出。完整实现见 [压测工具](../benmark/main.go)。
 
+延迟保存在一个按请求编号索引的精确切片中，报告前排序计算分位数；该切片在 64 位环境中占约 `8 × requests` 字节，另有每个 worker 的局部计数。请求数很大时仍需为客户端准备足够内存。GET/DELETE 不生成写入 value，`value-size` 影响 PUT 和数据预置。
+
 当前工具采用固定并发的闭环负载：每个 worker 等当前请求结束后才发送下一个请求。服务变慢时，客户端的发送速率也会下降；因此闭环 QPS 与 P99 不能单独证明系统在固定外部到达速率下的容量。评估过载行为还需要额外的固定到达速率实验，并联合观察排队、超时、拒绝和资源占用。当前工具未提供固定到达速率模式。
 
 ## 评估快照的代价
@@ -132,7 +137,7 @@ MINIKV_SNAPSHOT_INTERVAL_MS=1000 \
 ./build/engine
 ```
 
-另开终端启动网关并运行覆盖多个快照周期的负载。以相同初始数据和其他配置，分别比较自动快照关闭（`MINIKV_SNAPSHOT_INTERVAL_MS=0`）和开启的结果。至少记录数据集大小、快照耗时、进程内存峰值、成功吞吐量、错误率和尾延迟；快照耗时与内存峰值需要额外采集，当前压测报告没有这些指标。
+另开终端启动网关并运行覆盖多个快照周期的负载。以相同初始数据和其他配置，分别比较自动快照关闭（`MINIKV_SNAPSHOT_INTERVAL_MS=0`）和开启的结果。至少记录数据集大小、快照耗时、进程内存峰值、成功吞吐量、错误率和尾延迟。快照次数与阶段累计耗时可以通过 [`/stats`](observability.md) 的前后样本计算增量；进程内存峰值仍需额外采集，当前压测报告没有这些指标。
 
 一次实验仅改变一个主要变量，例如数据量、写入比例或快照周期，才能判断状态复制和 WAL 后缀重写的影响。并发设计本身不构成已有实测性能收益的证据。
 
