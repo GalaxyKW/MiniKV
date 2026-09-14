@@ -2,6 +2,7 @@
 #include "codec.h"
 
 #include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
@@ -9,6 +10,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <unordered_map>
@@ -122,6 +125,174 @@ void verify_captured_snapshot(const TempDir& dir) {
     require(entries == std::unordered_map<std::string, std::string>{
                 {"changed", "before"}, {"deleted", "before"}, {"stable", "unchanged"}},
             "snapshot contents changed after its state lock was released");
+}
+
+std::unordered_map<std::string, std::string> small_snapshot_image() {
+    std::unordered_map<std::string, std::string> image;
+    for (size_t index = 0; index < 256; ++index) {
+        const std::string key = "key-" + std::to_string(10000 + index).substr(1);
+        std::string value(1024, static_cast<char>(index % 251));
+        value.front() = '\0';
+        image.emplace(key, std::move(value));
+    }
+    return image;
+}
+
+void verify_image(Engine& engine, const std::unordered_map<std::string, std::string>& expected) {
+    require(engine.stats().keys == expected.size(), "recovered image has missing or extra keys");
+    for (const auto& entry : expected) {
+        const auto response = get(engine, entry.first);
+        require(response.status == Status::Value && response.value == entry.second,
+                "snapshot image did not recover an exact key/value");
+    }
+}
+
+void complete_image_spans_multiple_writes() {
+    TempDir dir;
+    const auto config = config_for(dir);
+    auto expected = small_snapshot_image();
+    std::string large(192 * 1024 + 17, '\0');
+    for (size_t index = 0; index < large.size(); ++index) large[index] = static_cast<char>(index % 251);
+    expected.emplace("large", std::move(large));
+    expected.emplace("empty", "");
+    expected.emplace(std::string("binary\0key", 10), std::string("\0a\nb\xff", 5));
+    const uint64_t sequence = expected.size();
+    {
+        Engine engine(config);
+        // Every entry belongs to the captured image, including the large value.
+        // No post-capture WAL suffix can conceal missing snapshot records.
+        for (const auto& entry : expected) put(engine, entry.first, entry.second);
+        engine.snapshot();
+        const auto bytes = read_file(dir.path + "/snapshot.v1");
+        require(bytes.size() >= 28 && bytes.substr(0, 8) == "MKVSNP01" &&
+                codec::u64(bytes, 8) == sequence && codec::u64(bytes, 16) == expected.size() &&
+                codec::u32(bytes, 24) == codec::crc32(std::string_view(bytes).substr(0, 24)),
+                "large snapshot header, count or checksum changed");
+        std::unordered_map<std::string, std::string> decoded;
+        size_t offset = 28;
+        while (offset < bytes.size()) {
+            const auto remaining = std::string_view(bytes).substr(offset);
+            const auto size = codec::record_size(remaining);
+            require(size <= remaining.size(), "snapshot ended inside a record");
+            const auto record = remaining.substr(0, size);
+            // decode_record validates the complete record and its CRC.
+            auto entry = codec::decode_record(record);
+            require(entry.operation == Operation::Put && codec::u64(record, 5) == sequence,
+                    "snapshot record has the wrong operation or sequence");
+            require(decoded.emplace(std::move(entry.key), std::move(entry.value)).second,
+                    "snapshot contains a duplicate key");
+            offset += size;
+        }
+        require(decoded == expected, "large snapshot changed its complete captured image");
+        require(read_file(dir.path + "/wal.v1").empty(), "snapshot verification still depends on WAL replay");
+        const auto stats = engine.stats();
+        require(stats.applied_sequence == sequence && stats.durable_sequence == sequence &&
+                stats.wal_pending_bytes == 0 && stats.wal_inflight_bytes == 0,
+                "snapshot did not finish checkpointing the captured image");
+        engine.close();
+    }
+    require(read_file(dir.path + "/wal.v1").empty(), "close unexpectedly populated the checkpointed WAL");
+    Engine recovered(config);
+    verify_image(recovered, expected);
+    require(recovered.stats().durable_sequence == sequence, "large snapshot recovered the wrong sequence");
+}
+
+// Used only in a forked child. Restore before Engine cleanup, assertions or any
+// continued write. An unrecoverable restoration error must not be hidden by a
+// destructor or leave the remainder of the test running under the reduced limit.
+class ScopedFileSizeLimit {
+public:
+    explicit ScopedFileSizeLimit(rlim_t limit) {
+        if (::getrlimit(RLIMIT_FSIZE, &original_) != 0) {
+            throw std::system_error(errno, std::generic_category(), "getrlimit");
+        }
+        require(original_.rlim_cur == RLIM_INFINITY || original_.rlim_cur > limit,
+                "file limit fixture must lower the original soft limit");
+        struct sigaction ignored {};
+        ignored.sa_handler = SIG_IGN;
+        ::sigemptyset(&ignored.sa_mask);
+        if (::sigaction(SIGXFSZ, &ignored, &previous_) != 0) {
+            throw std::system_error(errno, std::generic_category(), "ignore SIGXFSZ");
+        }
+        auto reduced = original_;
+        reduced.rlim_cur = limit;
+        if (::setrlimit(RLIMIT_FSIZE, &reduced) != 0) {
+            const auto error = errno;
+            if (::sigaction(SIGXFSZ, &previous_, nullptr) != 0) ::_exit(93);
+            throw std::system_error(error, std::generic_category(), "reduce file size limit");
+        }
+    }
+    ~ScopedFileSizeLimit() {
+        if (::setrlimit(RLIMIT_FSIZE, &original_) != 0 || ::sigaction(SIGXFSZ, &previous_, nullptr) != 0) ::_exit(93);
+    }
+    ScopedFileSizeLimit(const ScopedFileSizeLimit&) = delete;
+    ScopedFileSizeLimit& operator=(const ScopedFileSizeLimit&) = delete;
+
+private:
+    struct rlimit original_ {};
+    struct sigaction previous_ {};
+};
+
+void partial_snapshot_write_preserves_old_files() {
+    TempDir dir;
+    const auto config = config_for(dir);
+    auto expected = small_snapshot_image();
+    constexpr rlim_t limit = 96 * 1024 + 13;
+    // Construct Engine only after fork, with no engine threads in the parent.
+    const pid_t child = ::fork();
+    require(child >= 0, "fork failed");
+    if (child == 0) {
+        ::alarm(20);
+        try {
+            Engine engine(config);
+            put(engine, "key-0000", "old");
+            engine.snapshot();
+            for (const auto& entry : expected) put(engine, entry.first, entry.second);
+            const auto before = engine.stats();
+            require(before.applied_sequence == expected.size() + 1 &&
+                    before.durable_sequence == before.applied_sequence && before.wal_pending_bytes == 0,
+                    "file limit was applied before reliable preload had drained");
+            const auto old_snapshot = read_file(dir.path + "/snapshot.v1");
+            const auto old_wal = read_file(dir.path + "/wal.v1");
+            std::error_code failure;
+            {
+                ScopedFileSizeLimit scoped_limit(limit);
+                try { engine.snapshot(); }
+                catch (const std::system_error& error) { failure = error.code(); }
+            }
+            // The limit and signal disposition are restored even when snapshot
+            // throws a different exception; no assertion runs inside the scope.
+            require(failure == std::errc::file_too_large, "snapshot did not report real EFBIG");
+            require(fs::file_size(dir.path + "/snapshot.v1.tmp") == limit,
+                    "snapshot did not make a real partial write up to the file limit");
+            require(read_file(dir.path + "/snapshot.v1") == old_snapshot && read_file(dir.path + "/wal.v1") == old_wal,
+                    "partially written snapshot replaced the old image or compacted WAL");
+            const auto after = engine.stats();
+            require(after.snapshot_failures_total == before.snapshot_failures_total + 1 &&
+                    after.snapshot_successes_total == before.snapshot_successes_total &&
+                    !after.snapshot_in_progress && !after.io_failed &&
+                    after.applied_sequence == before.applied_sequence && after.durable_sequence == before.durable_sequence &&
+                    after.wal_pending_bytes == 0 && after.wal_commit_failures_total == before.wal_commit_failures_total,
+                    "snapshot short write changed WAL confirmation or terminal failure state");
+            put(engine, "continued", "after short write");
+            engine.close();
+            ::_exit(0);
+        } catch (const std::exception& error) {
+            std::cerr << "snapshot file-limit child: " << error.what() << std::endl;
+            ::_exit(92);
+        } catch (...) { ::_exit(94); }
+    }
+    int status = 0;
+    require(::waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+            "snapshot partial-write child failed, timed out or could not restore its file limit");
+    require(fs::file_size(dir.path + "/snapshot.v1.tmp") == limit, "partial snapshot fixture disappeared before recovery");
+    // Do not retry snapshot before this first recovery: the incomplete .tmp
+    // must be ignored while the old snapshot and retained WAL recover new data.
+    expected.emplace("continued", "after short write");
+    Engine recovered(config);
+    verify_image(recovered, expected);
+    require(recovered.stats().durable_sequence == expected.size() + 1,
+            "recovery after partial snapshot lost an acknowledged write");
 }
 
 void snapshot_io_allows_reliable_progress() {
@@ -394,6 +565,8 @@ void failures_preserve_acknowledged_suffix() {
 int main(int argc, char** argv) {
     try {
         const std::vector<std::pair<const char*, void(*)()>> tests = {
+            {"snapshot complete large image", complete_image_spans_multiple_writes},
+            {"snapshot partial system write", partial_snapshot_write_preserves_old_files},
             {"snapshot I/O progress and captured version", snapshot_io_allows_reliable_progress},
             {"automatic snapshot I/O progress", automatic_snapshot_allows_reliable_progress},
             {"concurrent snapshots serialize", concurrent_snapshots_serialize},

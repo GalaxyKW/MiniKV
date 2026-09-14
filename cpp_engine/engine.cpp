@@ -554,8 +554,29 @@ void Engine::install_snapshot(const std::unordered_map<std::string, std::string>
     File file(::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600));
     if (file.fd < 0) io_error("create snapshot");
     hook("snapshot.write");
-    write_all(file.fd, snapshot_header(sequence, image.size()));
-    for (const auto& entry : image) write_all(file.fd, codec::record(sequence, Operation::Put, entry.first, entry.second));
+    // Aggregate small records with bounded memory; oversized records go straight
+    // to write_all after any preceding buffered bytes have been written.
+    std::array<char, 64 * 1024> buffer;
+    size_t buffered = 0;
+    const auto flush = [&] {
+        if (buffered == 0) return;
+        write_all(file.fd, std::string_view(buffer.data(), buffered));
+        buffered = 0;
+    };
+    const auto append = [&](std::string_view bytes) {
+        if (bytes.size() > buffer.size()) {
+            flush();
+            write_all(file.fd, bytes);
+            return;
+        }
+        if (bytes.size() > buffer.size() - buffered) flush();
+        std::memcpy(buffer.data() + buffered, bytes.data(), bytes.size());
+        buffered += bytes.size();
+    };
+    append(snapshot_header(sequence, image.size()));
+    for (const auto& entry : image) append(codec::record(sequence, Operation::Put, entry.first, entry.second));
+    // A write failure must escape before the sync hook or snapshot installation.
+    flush();
     hook("snapshot.sync");
     sync_file(file.fd);
     hook("snapshot.rename");
