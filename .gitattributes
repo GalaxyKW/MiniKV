@@ -1,0 +1,3 @@
+# Unified diff context lines keep their leading space, including empty lines.
+# Preserve archived patches byte-for-byte; normal source whitespace checks remain.
+benmark/baselines/**/*.patch whitespace=-blank-at-eol
