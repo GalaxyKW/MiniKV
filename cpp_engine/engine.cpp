@@ -37,13 +37,38 @@ uint64_t elapsed_ns(StatsClock::time_point start) {
 // Declare outside all state-lock scopes. Accounting must not wait for I/O and
 // must still run when a phase throws, without replacing the original failure.
 struct TimedStage {
+    struct Delta {
+        uint64_t* destination = nullptr;
+        const uint64_t* local = nullptr;
+    };
     std::mutex& mutex;
     uint64_t& counter;
+    // Fixed local counters live longer than this timer. Publish them under the
+    // same lock as phase duration, including when file I/O throws.
+    std::array<Delta, 3> deltas{};
     StatsClock::time_point start = StatsClock::now();
     ~TimedStage() {
         const auto elapsed = elapsed_ns(start);
         std::lock_guard<std::mutex> lock(mutex);
         counter += elapsed;
+        for (const auto& delta : deltas) {
+            if (delta.destination) *delta.destination += *delta.local;
+        }
+    }
+};
+
+// Construct after acquiring capture's state lock so both clock reads and
+// accounting occur before that lock is released, also on a failed capture.
+struct TimedCaptureLock {
+    uint64_t& acquisitions;
+    uint64_t& duration;
+    uint64_t& maximum;
+    StatsClock::time_point start = StatsClock::now();
+    ~TimedCaptureLock() {
+        const auto elapsed = elapsed_ns(start);
+        ++acquisitions;
+        duration += elapsed;
+        if (elapsed > maximum) maximum = elapsed;
     }
 };
 
@@ -114,12 +139,14 @@ struct File {
     throw std::system_error(errno, std::generic_category(), operation);
 }
 
-void write_all(int fd, std::string_view bytes) {
+void write_all(int fd, std::string_view bytes, uint64_t* calls = nullptr, uint64_t* written_bytes = nullptr) {
     while (!bytes.empty()) {
+        if (calls) ++*calls;
         const ssize_t count = ::write(fd, bytes.data(), bytes.size());
         if (count < 0 && errno == EINTR) continue;
         if (count < 0) io_error("write");
         if (count == 0) throw std::runtime_error("write made no progress");
+        if (written_bytes) *written_bytes += static_cast<uint64_t>(count);
         bytes.remove_prefix(static_cast<size_t>(count));
     }
 }
@@ -548,7 +575,8 @@ void Engine::flush_locked() {
     }
 }
 
-void Engine::install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence) {
+void Engine::install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence,
+                              uint64_t& write_calls, uint64_t& written_bytes, uint64_t& installed_bytes) {
     const std::string temporary = config_.data_dir + "/snapshot.v1.tmp";
     const std::string installed = config_.data_dir + "/snapshot.v1";
     File file(::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600));
@@ -560,13 +588,13 @@ void Engine::install_snapshot(const std::unordered_map<std::string, std::string>
     size_t buffered = 0;
     const auto flush = [&] {
         if (buffered == 0) return;
-        write_all(file.fd, std::string_view(buffer.data(), buffered));
+        write_all(file.fd, std::string_view(buffer.data(), buffered), &write_calls, &written_bytes);
         buffered = 0;
     };
     const auto append = [&](std::string_view bytes) {
         if (bytes.size() > buffer.size()) {
             flush();
-            write_all(file.fd, bytes);
+            write_all(file.fd, bytes, &write_calls, &written_bytes);
             return;
         }
         if (bytes.size() > buffer.size() - buffered) flush();
@@ -583,12 +611,13 @@ void Engine::install_snapshot(const std::unordered_map<std::string, std::string>
     if (::rename(temporary.c_str(), installed.c_str()) != 0) io_error("install snapshot");
     hook("snapshot.dir_sync");
     sync_directory(config_.data_dir);
+    installed_bytes = written_bytes;
     hook("snapshot.after_install");
 }
 
 // The snapshot at boundary is already durable. Retain every subsequent byte,
 // including writes acknowledged while its file was being installed.
-void Engine::compact_wal(int64_t boundary) {
+void Engine::compact_wal(int64_t boundary, uint64_t& written_bytes) {
     try {
         hook("wal.truncate");
         const off_t end = ::lseek(wal_fd_, 0, SEEK_END);
@@ -607,7 +636,7 @@ void Engine::compact_wal(int64_t boundary) {
             if (count < 0 && errno == EINTR) continue;
             if (count < 0) io_error("read WAL suffix");
             if (count == 0) throw std::runtime_error("WAL suffix ended unexpectedly");
-            write_all(replacement.fd, std::string_view(buffer.data(), static_cast<size_t>(count)));
+            write_all(replacement.fd, std::string_view(buffer.data(), static_cast<size_t>(count)), nullptr, &written_bytes);
             offset += count;
         }
         hook("wal.compact.sync");
@@ -651,6 +680,9 @@ void Engine::snapshot() {
             io_lock.lock();
             {
                 std::lock_guard<std::mutex> lock(mutex_);
+                TimedCaptureLock state_timer{stats_.snapshot_capture_state_lock_acquisitions_total,
+                                             stats_.snapshot_capture_state_lock_duration_ns_total,
+                                             stats_.snapshot_capture_state_lock_duration_ns_max};
                 if (stopping_) throw std::runtime_error("engine is stopping");
                 if (!failure_.empty()) throw std::runtime_error(failure_);
                 // Copy before detaching: an allocation failure leaves the queue intact.
@@ -667,17 +699,23 @@ void Engine::snapshot() {
         }
         batch.clear();
         {
-            TimedStage timer{mutex_, stats_.snapshot_write_duration_ns_total};
-            install_snapshot(image, sequence);
+            uint64_t write_calls = 0, written_bytes = 0, installed_bytes = 0;
+            TimedStage timer{mutex_, stats_.snapshot_write_duration_ns_total,
+                             {{{&stats_.snapshot_file_write_calls_total, &write_calls},
+                               {&stats_.snapshot_file_written_bytes_total, &written_bytes},
+                               {&stats_.snapshot_file_installed_bytes_total, &installed_bytes}}}};
+            install_snapshot(image, sequence, write_calls, written_bytes, installed_bytes);
         }
         {
-            TimedStage timer{mutex_, stats_.snapshot_compact_duration_ns_total};
+            uint64_t written_bytes = 0;
+            TimedStage timer{mutex_, stats_.snapshot_compact_duration_ns_total,
+                             {{{&stats_.snapshot_compact_written_bytes_total, &written_bytes}}}};
             io_lock.lock();
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (!failure_.empty()) throw std::runtime_error(failure_);
             }
-            compact_wal(boundary);
+            compact_wal(boundary, written_bytes);
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 // A WAL commit during snapshot installation may be newer.

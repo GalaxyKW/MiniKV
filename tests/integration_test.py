@@ -196,6 +196,22 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(stats["engine"]["async_requests_inflight"], 0)
         self.assertEqual(stats["engine"]["async_requests_capacity"], 130)
         self.assertEqual(stats["engine"]["async_callback_failures_total"], 0)
+        snapshot_fields = (
+            "snapshot_capture_state_lock_acquisitions_total", "snapshot_capture_state_lock_duration_ns_total",
+            "snapshot_capture_state_lock_duration_ns_max", "snapshot_file_write_calls_total",
+            "snapshot_file_written_bytes_total", "snapshot_file_installed_bytes_total",
+            "snapshot_compact_written_bytes_total",
+        )
+        for field in snapshot_fields:
+            self.assertIs(type(stats["engine"][field]), int)
+            self.assertGreaterEqual(stats["engine"][field], 0)
+        self.assertGreaterEqual(stats["engine"]["snapshot_capture_state_lock_acquisitions_total"], 1)
+        self.assertLessEqual(stats["engine"]["snapshot_capture_state_lock_duration_ns_max"],
+                             stats["engine"]["snapshot_capture_state_lock_duration_ns_total"])
+        self.assertGreaterEqual(stats["engine"]["snapshot_file_written_bytes_total"], 28)
+        self.assertGreaterEqual(stats["engine"]["snapshot_file_installed_bytes_total"], 28)
+        self.assertLessEqual(stats["engine"]["snapshot_file_installed_bytes_total"],
+                             stats["engine"]["snapshot_file_written_bytes_total"])
         self.assertFalse(stats["engine"]["io_failed"])
         self.assertEqual(stats["server"]["workers_capacity"], 2)
         self.assertEqual(stats["server"]["requests_inflight"], 0)
@@ -225,6 +241,8 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(unavailable["error"], "backend_unavailable")
         self.assertNotIn("engine", unavailable)
         self.assertEqual(unavailable["gateway"]["rpc"]["calls_total"], 2)
+        # Keep process-counter reset observable before any new automatic work.
+        self.engine_env["MINIKV_SNAPSHOT_INTERVAL_MS"] = "0"
         self.start_engine()
         code, recovered = self.runtime_stats()
         self.assertEqual(code, 200)
@@ -233,6 +251,8 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(recovered["engine"]["wal_commits_total"], 0)
         for field in ("wal_capacity_waiters", "wal_capacity_waits_total", "wal_capacity_wait_duration_ns_total",
                       "wal_durable_waiters", "wal_durable_waits_total", "wal_durable_wait_duration_ns_total"):
+            self.assertEqual(recovered["engine"][field], 0)
+        for field in snapshot_fields:
             self.assertEqual(recovered["engine"][field], 0)
         self.assertEqual(recovered["server"]["requests_started_total"], 0)
         self.assertEqual(recovered["server"]["request_queue_wait_duration_ns_total"], 0)

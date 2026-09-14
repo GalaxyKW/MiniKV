@@ -8,6 +8,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <unistd.h>
 
 using namespace minikv;
@@ -173,6 +174,57 @@ void final_flush_is_accounted_without_relocking() {
             "final flush statistics were absent or counted twice");
 }
 
+void snapshot_capture_lock_excludes_wal_sync() {
+    TempDir dir;
+    auto config = config_for(dir);
+    config.wal_mode = WalMode::Throughput;
+    config.wal_batch_size = 512;
+    config.wal_flush_interval = 60s;
+    Gate gate;
+    config.io_hook = [&](const std::string& point) { gate(point); };
+    Engine engine(config);
+    const auto initial = engine.stats();
+    require(engine.execute({Operation::Put, "key", "value"}).status == Status::Ok, "write failed");
+    gate.armed = true;
+    auto checkpoint = std::async(std::launch::async, [&] { engine.snapshot(); });
+    const bool entered = gate.wait();
+    auto read = std::async(std::launch::async, [&] {
+        const auto first = engine.stats();
+        // The gate is outside the state lock. Observe the same capture while
+        // its WAL synchronization remains blocked, without a timing threshold.
+        (void)checkpoint.wait_for(20ms);
+        return std::make_pair(first, engine.stats());
+    });
+    const bool available = read.wait_for(300ms) == std::future_status::ready;
+    gate.release();
+    const auto samples = read.get();
+    checkpoint.get();
+    const auto after = engine.stats();
+    require(entered && available, "capture WAL synchronization blocked statistics");
+    for (const auto* during : {&samples.first, &samples.second}) {
+        require(during->snapshot_in_progress &&
+                during->snapshot_capture_state_lock_acquisitions_total ==
+                    initial.snapshot_capture_state_lock_acquisitions_total + 1 &&
+                during->snapshot_capture_state_lock_acquisitions_total == after.snapshot_capture_state_lock_acquisitions_total &&
+                during->snapshot_capture_state_lock_duration_ns_total == after.snapshot_capture_state_lock_duration_ns_total &&
+                during->snapshot_capture_state_lock_duration_ns_max == after.snapshot_capture_state_lock_duration_ns_max,
+                "capture lock accounting remained active during unlocked WAL synchronization");
+        require(during->snapshot_capture_duration_ns_total == initial.snapshot_capture_duration_ns_total &&
+                during->snapshot_file_write_calls_total == initial.snapshot_file_write_calls_total &&
+                during->snapshot_file_written_bytes_total == initial.snapshot_file_written_bytes_total &&
+                during->snapshot_file_installed_bytes_total == initial.snapshot_file_installed_bytes_total,
+                "unfinished capture published its phase duration or future snapshot writes");
+    }
+    require(after.snapshot_capture_duration_ns_total > initial.snapshot_capture_duration_ns_total &&
+            after.snapshot_capture_state_lock_duration_ns_total >= initial.snapshot_capture_state_lock_duration_ns_total &&
+            after.snapshot_capture_state_lock_duration_ns_max >= initial.snapshot_capture_state_lock_duration_ns_max &&
+            after.snapshot_capture_state_lock_duration_ns_max <= after.snapshot_capture_state_lock_duration_ns_total &&
+            after.snapshot_capture_state_lock_duration_ns_total - initial.snapshot_capture_state_lock_duration_ns_total <=
+                after.snapshot_capture_duration_ns_total - initial.snapshot_capture_duration_ns_total,
+            "capture state-lock duration is inconsistent with its containing phase");
+    engine.close();
+}
+
 void snapshots_report_phases_failures_and_recovery() {
     for (const std::string point : {"snapshot.write", "wal.compact.write"}) {
         TempDir dir;
@@ -185,6 +237,11 @@ void snapshots_report_phases_failures_and_recovery() {
             const auto initial = engine.stats();
             require(initial.snapshot_successes_total == 1 && initial.snapshot_sequence == 0,
                     "initial database snapshot was not counted");
+            require(initial.snapshot_capture_state_lock_acquisitions_total == 1 &&
+                    initial.snapshot_capture_state_lock_duration_ns_max == initial.snapshot_capture_state_lock_duration_ns_total &&
+                    initial.snapshot_file_write_calls_total >= 1 && initial.snapshot_file_written_bytes_total == 28 &&
+                    initial.snapshot_file_installed_bytes_total == 28 && initial.snapshot_compact_written_bytes_total == 0,
+                    "new database did not account for its complete empty snapshot");
             require(engine.execute({Operation::Put, "key", "value"}).status == Status::Ok, "write failed");
             gate.armed = true;
             auto checkpoint = std::async(std::launch::async, [&] { engine.snapshot(); });
@@ -211,8 +268,14 @@ void snapshots_report_phases_failures_and_recovery() {
                 recovered_stats.applied_sequence == 1 && recovered_stats.keys == 1 &&
                 recovered_stats.snapshot_successes_total == 0 && recovered_stats.wal_commits_total == 0,
                 "restart did not preserve sequences and reset process counters");
+        require(recovered_stats.snapshot_capture_state_lock_acquisitions_total == 0 &&
+                recovered_stats.snapshot_capture_state_lock_duration_ns_total == 0 &&
+                recovered_stats.snapshot_capture_state_lock_duration_ns_max == 0 &&
+                recovered_stats.snapshot_file_write_calls_total == 0 && recovered_stats.snapshot_file_written_bytes_total == 0 &&
+                recovered_stats.snapshot_file_installed_bytes_total == 0 && recovered_stats.snapshot_compact_written_bytes_total == 0,
+                "recovery counted existing files as snapshot work by the new process");
     }
-    for (const std::string point : {"wal.sync", "snapshot.write", "wal.compact.write"}) {
+    for (const std::string point : {"wal.sync", "snapshot.write", "snapshot.sync", "snapshot.after_install", "wal.compact.write"}) {
         TempDir dir;
         auto config = config_for(dir);
         config.wal_mode = WalMode::Throughput;
@@ -229,7 +292,22 @@ void snapshots_report_phases_failures_and_recovery() {
         must_fail([&] { engine.snapshot(); }, "snapshot failure not injected");
         const auto stats = engine.stats();
         require(stats.snapshot_successes_total == 1 && stats.snapshot_failures_total == 1 && !stats.snapshot_in_progress &&
-                stats.io_failed == (point != "snapshot.write"), "snapshot failure or storage health was misreported");
+                stats.io_failed == (point == "wal.sync" || point == "wal.compact.write"),
+                "snapshot failure or storage health was misreported");
+        require(stats.snapshot_capture_state_lock_acquisitions_total == initial.snapshot_capture_state_lock_acquisitions_total + 1 &&
+                stats.snapshot_capture_state_lock_duration_ns_total >= initial.snapshot_capture_state_lock_duration_ns_total &&
+                stats.snapshot_capture_state_lock_duration_ns_max >= initial.snapshot_capture_state_lock_duration_ns_max,
+                "failed snapshot lost its completed capture critical section");
+        const bool wrote_file = point == "snapshot.sync" || point == "snapshot.after_install" || point == "wal.compact.write";
+        const bool installed_file = point == "snapshot.after_install" || point == "wal.compact.write";
+        const uint64_t file_bytes = 28 + codec::kRecordHeader + 3 + 5 + 4;
+        require(stats.snapshot_file_written_bytes_total - initial.snapshot_file_written_bytes_total == (wrote_file ? file_bytes : 0) &&
+                stats.snapshot_file_installed_bytes_total - initial.snapshot_file_installed_bytes_total == (installed_file ? file_bytes : 0) &&
+                stats.snapshot_compact_written_bytes_total == initial.snapshot_compact_written_bytes_total,
+                "failed checkpoint conflated file writes, durable installation and WAL suffix copying: " + point);
+        require(wrote_file ? stats.snapshot_file_write_calls_total > initial.snapshot_file_write_calls_total
+                           : stats.snapshot_file_write_calls_total == initial.snapshot_file_write_calls_total,
+                "snapshot write calls included unreached writes or omitted a completed write: " + point);
         require(stats.snapshot_capture_duration_ns_total > initial.snapshot_capture_duration_ns_total,
                 "failed snapshot capture duration was not recorded");
         if (point == "wal.sync") {
@@ -300,6 +378,7 @@ int main(int argc, char** argv) {
             {"WAL progress and failure statistics", wal_progress_and_failure_remain_observable},
             {"queued versus in-flight statistics", queued_and_inflight_bytes_are_distinct},
             {"final flush statistics", final_flush_is_accounted_without_relocking},
+            {"snapshot capture lock excludes WAL synchronization", snapshot_capture_lock_excludes_wal_sync},
             {"snapshot phases, failures and recovery statistics", snapshots_report_phases_failures_and_recovery},
             {"worker pool statistics", pool_reports_queued_and_active_work},
         };

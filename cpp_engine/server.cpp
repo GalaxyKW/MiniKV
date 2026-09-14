@@ -527,8 +527,15 @@ private:
         field("snapshot_in_progress", engine.snapshot_in_progress);
         field("snapshot_sequence", engine.snapshot_sequence);
         field("snapshot_capture_duration_ns_total", engine.snapshot_capture_duration_ns_total);
+        field("snapshot_capture_state_lock_acquisitions_total", engine.snapshot_capture_state_lock_acquisitions_total);
+        field("snapshot_capture_state_lock_duration_ns_total", engine.snapshot_capture_state_lock_duration_ns_total);
+        field("snapshot_capture_state_lock_duration_ns_max", engine.snapshot_capture_state_lock_duration_ns_max);
         field("snapshot_write_duration_ns_total", engine.snapshot_write_duration_ns_total);
+        field("snapshot_file_write_calls_total", engine.snapshot_file_write_calls_total);
+        field("snapshot_file_written_bytes_total", engine.snapshot_file_written_bytes_total);
+        field("snapshot_file_installed_bytes_total", engine.snapshot_file_installed_bytes_total);
         field("snapshot_compact_duration_ns_total", engine.snapshot_compact_duration_ns_total);
+        field("snapshot_compact_written_bytes_total", engine.snapshot_compact_written_bytes_total);
         field("io_failed", engine.io_failed);
         field("stopping", engine.stopping);
         out << "},\"server\":{\"connections\":" << connections_.load(std::memory_order_relaxed);

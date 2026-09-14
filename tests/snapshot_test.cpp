@@ -162,6 +162,7 @@ void complete_image_spans_multiple_writes() {
         // Every entry belongs to the captured image, including the large value.
         // No post-capture WAL suffix can conceal missing snapshot records.
         for (const auto& entry : expected) put(engine, entry.first, entry.second);
+        const auto before = engine.stats();
         engine.snapshot();
         const auto bytes = read_file(dir.path + "/snapshot.v1");
         require(bytes.size() >= 28 && bytes.substr(0, 8) == "MKVSNP01" &&
@@ -189,6 +190,11 @@ void complete_image_spans_multiple_writes() {
         require(stats.applied_sequence == sequence && stats.durable_sequence == sequence &&
                 stats.wal_pending_bytes == 0 && stats.wal_inflight_bytes == 0,
                 "snapshot did not finish checkpointing the captured image");
+        require(stats.snapshot_file_written_bytes_total - before.snapshot_file_written_bytes_total == bytes.size() &&
+                stats.snapshot_file_installed_bytes_total - before.snapshot_file_installed_bytes_total == bytes.size() &&
+                stats.snapshot_file_write_calls_total > before.snapshot_file_write_calls_total &&
+                stats.snapshot_compact_written_bytes_total == before.snapshot_compact_written_bytes_total,
+                "complete snapshot byte accounting differs from its verified file or includes an empty WAL suffix");
         engine.close();
     }
     require(read_file(dir.path + "/wal.v1").empty(), "close unexpectedly populated the checkpointed WAL");
@@ -248,32 +254,43 @@ void partial_snapshot_write_preserves_old_files() {
             put(engine, "key-0000", "old");
             engine.snapshot();
             for (const auto& entry : expected) put(engine, entry.first, entry.second);
-            const auto before = engine.stats();
+            auto before = engine.stats();
             require(before.applied_sequence == expected.size() + 1 &&
                     before.durable_sequence == before.applied_sequence && before.wal_pending_bytes == 0,
                     "file limit was applied before reliable preload had drained");
             const auto old_snapshot = read_file(dir.path + "/snapshot.v1");
             const auto old_wal = read_file(dir.path + "/wal.v1");
-            std::error_code failure;
-            {
-                ScopedFileSizeLimit scoped_limit(limit);
-                try { engine.snapshot(); }
-                catch (const std::system_error& error) { failure = error.code(); }
+            // Zero bytes first proves that failed write syscalls are counted,
+            // without assuming a fixed number of positive writes or retries.
+            // The last attempt leaves a real partial file for the first restart.
+            for (const rlim_t trial_limit : {rlim_t(0), limit}) {
+                std::error_code failure;
+                {
+                    ScopedFileSizeLimit scoped_limit(trial_limit);
+                    try { engine.snapshot(); }
+                    catch (const std::system_error& error) { failure = error.code(); }
+                }
+                // Restore the limit and signal disposition before assertions,
+                // even when snapshot throws a different exception.
+                require(failure == std::errc::file_too_large, "snapshot did not report real EFBIG");
+                require(fs::file_size(dir.path + "/snapshot.v1.tmp") == trial_limit,
+                        "snapshot did not write exactly up to the file limit");
+                require(read_file(dir.path + "/snapshot.v1") == old_snapshot && read_file(dir.path + "/wal.v1") == old_wal,
+                        "failed snapshot replaced the old image or compacted WAL");
+                const auto after = engine.stats();
+                require(after.snapshot_failures_total == before.snapshot_failures_total + 1 &&
+                        after.snapshot_successes_total == before.snapshot_successes_total &&
+                        !after.snapshot_in_progress && !after.io_failed &&
+                        after.applied_sequence == before.applied_sequence && after.durable_sequence == before.durable_sequence &&
+                        after.wal_pending_bytes == 0 && after.wal_commit_failures_total == before.wal_commit_failures_total,
+                        "snapshot write failure changed WAL confirmation or terminal failure state");
+                require(after.snapshot_file_written_bytes_total - before.snapshot_file_written_bytes_total == trial_limit &&
+                        after.snapshot_file_installed_bytes_total == before.snapshot_file_installed_bytes_total &&
+                        after.snapshot_compact_written_bytes_total == before.snapshot_compact_written_bytes_total &&
+                        after.snapshot_file_write_calls_total > before.snapshot_file_write_calls_total,
+                        "snapshot accounting lost failed write calls or partial bytes, or claimed installation");
+                before = after;
             }
-            // The limit and signal disposition are restored even when snapshot
-            // throws a different exception; no assertion runs inside the scope.
-            require(failure == std::errc::file_too_large, "snapshot did not report real EFBIG");
-            require(fs::file_size(dir.path + "/snapshot.v1.tmp") == limit,
-                    "snapshot did not make a real partial write up to the file limit");
-            require(read_file(dir.path + "/snapshot.v1") == old_snapshot && read_file(dir.path + "/wal.v1") == old_wal,
-                    "partially written snapshot replaced the old image or compacted WAL");
-            const auto after = engine.stats();
-            require(after.snapshot_failures_total == before.snapshot_failures_total + 1 &&
-                    after.snapshot_successes_total == before.snapshot_successes_total &&
-                    !after.snapshot_in_progress && !after.io_failed &&
-                    after.applied_sequence == before.applied_sequence && after.durable_sequence == before.durable_sequence &&
-                    after.wal_pending_bytes == 0 && after.wal_commit_failures_total == before.wal_commit_failures_total,
-                    "snapshot short write changed WAL confirmation or terminal failure state");
             put(engine, "continued", "after short write");
             engine.close();
             ::_exit(0);
@@ -306,6 +323,7 @@ void snapshot_io_allows_reliable_progress() {
     {
         Engine engine(config);
         seed(engine);
+        const auto before = engine.stats();
         gate.armed = true;
         auto snapshot = std::async(std::launch::async, [&] { engine.snapshot(); });
         const bool entered = gate.wait();
@@ -326,6 +344,12 @@ void snapshot_io_allows_reliable_progress() {
                                   codec::record(6, Operation::Put, "added", "after");
         require(read_file(dir.path + "/wal.v1") == expected_wal,
                 "WAL compaction did not retain exactly the post-checkpoint suffix");
+        const auto after = engine.stats();
+        const auto snapshot_bytes = fs::file_size(dir.path + "/snapshot.v1");
+        require(after.snapshot_compact_written_bytes_total - before.snapshot_compact_written_bytes_total == expected_wal.size() &&
+                after.snapshot_file_written_bytes_total - before.snapshot_file_written_bytes_total == snapshot_bytes &&
+                after.snapshot_file_installed_bytes_total - before.snapshot_file_installed_bytes_total == snapshot_bytes,
+                "snapshot and concurrently retained WAL suffix bytes were conflated");
         // This append detects writers left attached to the unlinked old WAL.
         put(engine, "after-replacement", "persisted");
         engine.close();

@@ -71,25 +71,32 @@ type engineStats struct {
 	WalCommitDurationNS     uint64 `json:"wal_commit_duration_ns_total"`
 	WalCommitLastDurationNS uint64 `json:"wal_commit_last_duration_ns"`
 	// Optional counters distinguish unavailable fields from a measured zero
-	// across engine versions that add wait and asynchronous request metrics.
-	WalCapacityWaiters         *uint64 `json:"wal_capacity_waiters,omitempty"`
-	WalCapacityWaitsTotal      *uint64 `json:"wal_capacity_waits_total,omitempty"`
-	WalCapacityWaitDurationNS  *uint64 `json:"wal_capacity_wait_duration_ns_total,omitempty"`
-	WalDurableWaiters          *uint64 `json:"wal_durable_waiters,omitempty"`
-	WalDurableWaitsTotal       *uint64 `json:"wal_durable_waits_total,omitempty"`
-	WalDurableWaitDurationNS   *uint64 `json:"wal_durable_wait_duration_ns_total,omitempty"`
-	AsyncRequestsInflight      *uint64 `json:"async_requests_inflight,omitempty"`
-	AsyncRequestsCapacity      *uint64 `json:"async_requests_capacity,omitempty"`
-	AsyncCallbackFailuresTotal *uint64 `json:"async_callback_failures_total,omitempty"`
-	SnapshotSuccessesTotal     uint64  `json:"snapshot_successes_total"`
-	SnapshotFailuresTotal      uint64  `json:"snapshot_failures_total"`
-	SnapshotInProgress         bool    `json:"snapshot_in_progress"`
-	SnapshotSequence           uint64  `json:"snapshot_sequence"`
-	SnapshotCaptureDurationNS  uint64  `json:"snapshot_capture_duration_ns_total"`
-	SnapshotWriteDurationNS    uint64  `json:"snapshot_write_duration_ns_total"`
-	SnapshotCompactDurationNS  uint64  `json:"snapshot_compact_duration_ns_total"`
-	IOFailed                   bool    `json:"io_failed"`
-	Stopping                   bool    `json:"stopping"`
+	// across engine versions that add wait, asynchronous request and snapshot metrics.
+	WalCapacityWaiters                        *uint64 `json:"wal_capacity_waiters,omitempty"`
+	WalCapacityWaitsTotal                     *uint64 `json:"wal_capacity_waits_total,omitempty"`
+	WalCapacityWaitDurationNS                 *uint64 `json:"wal_capacity_wait_duration_ns_total,omitempty"`
+	WalDurableWaiters                         *uint64 `json:"wal_durable_waiters,omitempty"`
+	WalDurableWaitsTotal                      *uint64 `json:"wal_durable_waits_total,omitempty"`
+	WalDurableWaitDurationNS                  *uint64 `json:"wal_durable_wait_duration_ns_total,omitempty"`
+	AsyncRequestsInflight                     *uint64 `json:"async_requests_inflight,omitempty"`
+	AsyncRequestsCapacity                     *uint64 `json:"async_requests_capacity,omitempty"`
+	AsyncCallbackFailuresTotal                *uint64 `json:"async_callback_failures_total,omitempty"`
+	SnapshotSuccessesTotal                    uint64  `json:"snapshot_successes_total"`
+	SnapshotFailuresTotal                     uint64  `json:"snapshot_failures_total"`
+	SnapshotInProgress                        bool    `json:"snapshot_in_progress"`
+	SnapshotSequence                          uint64  `json:"snapshot_sequence"`
+	SnapshotCaptureDurationNS                 uint64  `json:"snapshot_capture_duration_ns_total"`
+	SnapshotWriteDurationNS                   uint64  `json:"snapshot_write_duration_ns_total"`
+	SnapshotCompactDurationNS                 uint64  `json:"snapshot_compact_duration_ns_total"`
+	SnapshotCaptureStateLockAcquisitionsTotal *uint64 `json:"snapshot_capture_state_lock_acquisitions_total,omitempty"`
+	SnapshotCaptureStateLockDurationNS        *uint64 `json:"snapshot_capture_state_lock_duration_ns_total,omitempty"`
+	SnapshotCaptureStateLockMaxDurationNS     *uint64 `json:"snapshot_capture_state_lock_duration_ns_max,omitempty"`
+	SnapshotFileWriteCallsTotal               *uint64 `json:"snapshot_file_write_calls_total,omitempty"`
+	SnapshotFileWrittenBytesTotal             *uint64 `json:"snapshot_file_written_bytes_total,omitempty"`
+	SnapshotFileInstalledBytesTotal           *uint64 `json:"snapshot_file_installed_bytes_total,omitempty"`
+	SnapshotCompactWrittenBytesTotal          *uint64 `json:"snapshot_compact_written_bytes_total,omitempty"`
+	IOFailed                                  bool    `json:"io_failed"`
+	Stopping                                  bool    `json:"stopping"`
 }
 
 type serverStats struct {

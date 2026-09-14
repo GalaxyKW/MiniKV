@@ -84,6 +84,20 @@ struct EngineStats {
     uint64_t snapshot_capture_duration_ns_total = 0;
     uint64_t snapshot_write_duration_ns_total = 0;
     uint64_t snapshot_compact_duration_ns_total = 0;
+    // Only the capture critical section, after acquiring state and before
+    // releasing it. Includes failed captures, excludes lock waits and WAL I/O.
+    uint64_t snapshot_capture_state_lock_acquisitions_total = 0;
+    uint64_t snapshot_capture_state_lock_duration_ns_total = 0;
+    uint64_t snapshot_capture_state_lock_duration_ns_max = 0;
+    // Published when the corresponding file stage exits, including failure.
+    // Calls include retries/errors; bytes count positive write returns only.
+    uint64_t snapshot_file_write_calls_total = 0;
+    uint64_t snapshot_file_written_bytes_total = 0;
+    // Snapshot bytes whose rename and directory sync succeeded, even if later
+    // checkpoint work fails. These are file bytes, not device write accounting.
+    uint64_t snapshot_file_installed_bytes_total = 0;
+    // Positive write returns for WAL suffix copies, including failed rewrites.
+    uint64_t snapshot_compact_written_bytes_total = 0;
     bool io_failed = false;
     bool stopping = false;
 };
@@ -141,8 +155,9 @@ private:
     void flush_pending();
     // Requires both I/O and state locks; used only for the final shutdown flush.
     void flush_locked();
-    void install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence);
-    void compact_wal(int64_t boundary);
+    void install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence,
+                          uint64_t& write_calls, uint64_t& written_bytes, uint64_t& installed_bytes);
+    void compact_wal(int64_t boundary, uint64_t& written_bytes);
     void background_work();
     void background_snapshots();
     void background_replies();

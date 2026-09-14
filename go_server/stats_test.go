@@ -93,6 +93,9 @@ var optionalStatsFields = map[string][]string{
 		"wal_capacity_waiters", "wal_capacity_waits_total", "wal_capacity_wait_duration_ns_total",
 		"wal_durable_waiters", "wal_durable_waits_total", "wal_durable_wait_duration_ns_total",
 		"async_requests_inflight", "async_requests_capacity", "async_callback_failures_total",
+		"snapshot_capture_state_lock_acquisitions_total", "snapshot_capture_state_lock_duration_ns_total",
+		"snapshot_capture_state_lock_duration_ns_max", "snapshot_file_write_calls_total",
+		"snapshot_file_written_bytes_total", "snapshot_file_installed_bytes_total", "snapshot_compact_written_bytes_total",
 	},
 	"server": {"requests_started_total", "request_queue_wait_duration_ns_total", "requests_inflight", "requests_capacity"},
 }
@@ -111,6 +114,7 @@ func statsPayloadWithOptionalFields(t *testing.T, fields map[string]map[string]j
 		}
 		values["wait_request_details"] = json.RawMessage(`{"key":"SENSITIVE_REQUEST_KEY"}`)
 		values["async_request_details"] = json.RawMessage(`{"key":"SENSITIVE_ASYNC_KEY"}`)
+		values["snapshot_record_details"] = json.RawMessage(`{"key":"SENSITIVE_SNAPSHOT_KEY"}`)
 		for field, value := range fields[section] {
 			values[field] = value
 		}
@@ -143,6 +147,12 @@ func TestStatsHTTPOptionalFieldsPreserveMissingZeroAndUint64Values(t *testing.T)
 			"engine": {"async_requests_inflight": json.RawMessage(`1`)},
 			"server": {"requests_capacity": json.RawMessage(`512`)},
 		}},
+		{name: "partial_snapshot_fields", fields: map[string]map[string]json.RawMessage{
+			"engine": {
+				"snapshot_capture_state_lock_acquisitions_total": json.RawMessage(`3`),
+				"snapshot_file_written_bytes_total":              json.RawMessage(`0`),
+			},
+		}},
 		{name: "all_async_zeros_are_present", fields: map[string]map[string]json.RawMessage{
 			"engine": {
 				"async_requests_inflight": json.RawMessage(`0`), "async_requests_capacity": json.RawMessage(`0`),
@@ -162,15 +172,22 @@ func TestStatsHTTPOptionalFieldsPreserveMissingZeroAndUint64Values(t *testing.T)
 		}},
 		{name: "complete_current_engine", fields: map[string]map[string]json.RawMessage{
 			"engine": {
-				"wal_capacity_waiters":                json.RawMessage(`0`),
-				"wal_capacity_waits_total":            json.RawMessage(`9`),
-				"wal_capacity_wait_duration_ns_total": json.RawMessage(`18446744073709551615`),
-				"wal_durable_waiters":                 json.RawMessage(`2`),
-				"wal_durable_waits_total":             json.RawMessage(`9007199254740993`),
-				"wal_durable_wait_duration_ns_total":  json.RawMessage(`123456789`),
-				"async_requests_inflight":             json.RawMessage(`9007199254740993`),
-				"async_requests_capacity":             json.RawMessage(`18446744073709551615`),
-				"async_callback_failures_total":       json.RawMessage(`19`),
+				"wal_capacity_waiters":                           json.RawMessage(`0`),
+				"wal_capacity_waits_total":                       json.RawMessage(`9`),
+				"wal_capacity_wait_duration_ns_total":            json.RawMessage(`18446744073709551615`),
+				"wal_durable_waiters":                            json.RawMessage(`2`),
+				"wal_durable_waits_total":                        json.RawMessage(`9007199254740993`),
+				"wal_durable_wait_duration_ns_total":             json.RawMessage(`123456789`),
+				"async_requests_inflight":                        json.RawMessage(`9007199254740993`),
+				"async_requests_capacity":                        json.RawMessage(`18446744073709551615`),
+				"async_callback_failures_total":                  json.RawMessage(`19`),
+				"snapshot_capture_state_lock_acquisitions_total": json.RawMessage(`8`),
+				"snapshot_capture_state_lock_duration_ns_total":  json.RawMessage(`9007199254740993`),
+				"snapshot_capture_state_lock_duration_ns_max":    json.RawMessage(`123456789`),
+				"snapshot_file_write_calls_total":                json.RawMessage(`31`),
+				"snapshot_file_written_bytes_total":              json.RawMessage(`18446744073709551615`),
+				"snapshot_file_installed_bytes_total":            json.RawMessage(`9007199254740993`),
+				"snapshot_compact_written_bytes_total":           json.RawMessage(`0`),
 			},
 			"server": {
 				"requests_started_total":               json.RawMessage(`18446744073709551615`),
@@ -179,6 +196,21 @@ func TestStatsHTTPOptionalFieldsPreserveMissingZeroAndUint64Values(t *testing.T)
 				"requests_capacity":                    json.RawMessage(`18446744073709551615`),
 			},
 		}},
+	}
+	// Exercise every optional counter without passing through float64, including
+	// a real zero, values above JavaScript's exact range, and the full uint64 range.
+	for _, value := range []string{`0`, `9007199254740993`, `18446744073709551615`, `null`} {
+		fields := make(map[string]map[string]json.RawMessage)
+		for section, names := range optionalStatsFields {
+			fields[section] = make(map[string]json.RawMessage)
+			for _, name := range names {
+				fields[section][name] = json.RawMessage(value)
+			}
+		}
+		tests = append(tests, struct {
+			name   string
+			fields map[string]map[string]json.RawMessage
+		}{name: "all_optional_fields_" + value, fields: fields})
 	}
 	data := newRPCClient("unused", 2, time.Second)
 	defer data.Close()
