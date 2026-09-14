@@ -181,7 +181,7 @@ make sanitize-test
 
 ## 性能基线与复现
 
-已保存提交 `7c488b7` 的 **24 轮原始实验记录**：两种 WAL 模式 × 快照开关 × 3 次重复，分别开启和关闭周期采样。以下为开启采样的 12 轮结果，每组列出轮次中位数；全部完成，系统失败为 0。成功 QPS 包含符合协议的 `NOT_FOUND`，不代表全部命中。
+初始基线保存了提交 `7c488b7` 的 **24 轮原始实验记录**：两种 WAL 模式 × 快照开关 × 3 次重复，分别开启和关闭周期采样。以下为开启采样的 12 轮结果，每组列出轮次中位数；全部完成，系统失败为 0。成功 QPS 包含符合协议的 `NOT_FOUND`，不代表全部命中。
 
 | 模式 | 自动快照 | 成功 QPS | 每轮 P99 中位数 |
 | --- | --- | ---: | ---: |
@@ -193,6 +193,8 @@ make sanitize-test
 条件：Xeon E3-1270 v3、Linux / NTFS3，客户端和服务端共用主机；每轮 100,000 请求、40 个闭环 worker、5,000 key、128 字节 value，20% PUT / 5% DELETE / 75% GET；引擎 20 线程、RPC 池 64、WAL batch 64 / flush 2 ms。资源和状态分别每 100 / 250 ms 采样，预置不计入测量。
 
 两种模式的确认语义不同，不能只看 QPS 判断优劣。可靠模式关闭快照时，各轮 P99 为 **10.022–15.523 ms**，存在慢轮次；同机负载也未完全受控。当前样本不足以证明快照成本可忽略，或把两批差值全部归为采样开销。完整范围、环境、等待分析与原始归档见[性能基线](docs/performance-baseline.md)。这些结果是特定条件下的观测，不是容量承诺。
+
+后续还完成了 12 轮[刷新间隔 2→1→2 ms 的控制实验](docs/performance-controls.md)：提交周期和吞吐量随参数改变并返回，为定位可靠模式的等待来源提供了进一步证据。
 
 ### 自己运行并核对结果
 
@@ -233,6 +235,7 @@ python3 benmark/summarize.py /tmp/minikv-readme-experiment --format json > /tmp/
 | 压测参数、确定性负载与 JSON 结果 | [压测报告指南](docs/benchmark-report.md) |
 | 自动启动服务、重复实验与资源采样 | [自动化性能实验](docs/benchmark-experiments.md) |
 | 实测结果、等待分析与原始数据 | [性能基线](docs/performance-baseline.md) |
+| 单变量参数比较与返回对照 | [WAL 刷新间隔控制实验](docs/performance-controls.md) |
 | 内存状态、WAL、快照与恢复 | [cpp_engine/engine.cpp](cpp_engine/engine.cpp) |
 | TCP 连接管理与二进制编码 | [cpp_engine/server.cpp](cpp_engine/server.cpp)、[codec.h](cpp_engine/codec.h) |
 | HTTP 网关与 RPC 连接池 | [go_server/](go_server/) |

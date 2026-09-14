@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "runtime_revision": "7c488b7404b694cef34f39fa60cc762d475d0048",
+  "description": "Raw synthetic reliable-mode controls, 1ms flush followed by a return to 2ms. Actual executable copies and generated data omitted; all runs used the same frozen binaries as the initial baseline. Absolute paths are original-run provenance.",
+  "archives": [
+    {
+      "name": "flush1",
+      "file": "flush1.tar.gz",
+      "sha256": "9003794b300550118581f52f28b88864e700aea5a5d83894e7b1a8a105a6f535",
+      "size_bytes": 267042,
+      "raw_bytes": 3383259,
+      "files": 69,
+      "runs": 6
+    },
+    {
+      "name": "flush2-return",
+      "file": "flush2-return.tar.gz",
+      "sha256": "db46e0d19f2e2bc0fe874cf58ec12ea8e6839d71045889246f31499236576227",
+      "size_bytes": 331292,
+      "raw_bytes": 4292339,
+      "files": 69,
+      "runs": 6
+    }
+  ]
+}
