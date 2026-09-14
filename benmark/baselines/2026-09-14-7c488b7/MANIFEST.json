@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "runtime_revision": "7c488b7404b694cef34f39fa60cc762d475d0048",
+  "description": "Raw synthetic experiment records. Executable copies and generated data files are omitted; their recorded hashes/configurations are retained. Absolute paths in records describe the original run environment.",
+  "archives": [
+    {
+      "name": "sampled",
+      "file": "sampled.tar.gz",
+      "sha256": "5db5f16885e2e997e4ea7f30dde0416e44be28adcdcb7264e1db53a209b8d2d1",
+      "size_bytes": 386948,
+      "raw_bytes": 4804180,
+      "files": 136,
+      "runs": 12
+    },
+    {
+      "name": "unsampled",
+      "file": "unsampled.tar.gz",
+      "sha256": "535708959a325da7769df298dfe22ff5a4d3fa82197a77a18f271b0c862b0649",
+      "size_bytes": 14546,
+      "raw_bytes": 180078,
+      "files": 135,
+      "runs": 12
+    }
+  ]
+}

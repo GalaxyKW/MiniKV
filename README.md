@@ -2,40 +2,16 @@
 
 **C++17 存储引擎 · Go HTTP 网关 · 单机持久化 KV**
 
-MiniKV 将数据保存在内存中，通过 WAL（预写日志）与快照完成持久化和恢复。项目围绕三个问题展开：**写入何时可以确认成功、后台 I/O 如何与请求并行、故障后如何验证数据仍然正确。**
+MiniKV 是一个从存储引擎到 HTTP 接口的单机 KV 项目。数据常驻内存，WAL（预写日志）记录变更，快照缩短日志回放。项目围绕三个问题展开：**写入何时可以确认成功、后台 I/O 如何与请求并行、故障后如何验证数据仍然正确。**
 
-[快速开始](#快速开始) · [系统架构](#系统架构) · [运行状态](#运行状态) · [设计与取舍](#关键设计与取舍) · [测试](#正确性如何验证) · [压测](#可复现压测) · [后续路线](#后续路线)
+[快速开始](#快速开始) · [系统架构](#系统架构) · [设计与取舍](#关键设计与取舍) · [测试](#正确性如何验证) · [性能基线](#性能基线与复现) · [后续路线](#后续路线)
 
 - **明确的提交语义**：提供 `throughput` 与 `reliable` 两种模式，区分内存可见和 WAL 已同步。
 - **并发持久化**：WAL 批量提交，快照文件写盘期间继续处理请求和提交 WAL，回收时保留快照生成期间的新日志。
 - **可重复的故障验证**：在写入、同步、rename 等边界注入失败或退出进程，再通过重启、读取和继续写入检查恢复结果。
 - **可观察的运行状态**：通过 `/stats` 读取 WAL 积压、提交与快照耗时、请求队列和 RPC 池数据。
 
-## 系统架构
-
-```mermaid
-flowchart TB
-    Client["curl / minikv-bench"] -->|HTTP| Gateway
-    subgraph Go["Go 网关"]
-        Gateway["JSON 校验 / HTTP 响应"] --> Pool["有界 RPC 连接池 / 请求截止时间"]
-    end
-    Pool -->|TCP 二进制帧| Reactor
-    subgraph CPP["C++ 存储引擎"]
-        Reactor["epoll：连接与收发缓冲"] --> Workers["有界任务队列 / 工作线程"]
-        Workers --> State["内存 KV / 有序 WAL 队列"]
-        State -.-> Flush["WAL 线程：批量写入与同步"]
-        State -.->|复制序列 S 的状态| Snapshot["快照线程：写出与安装"]
-    end
-    Flush --> WAL[("wal.v1")]
-    Snapshot --> Image[("snapshot.v1")]
-    Snapshot -.->|原子保留 S 之后的日志| WAL
-```
-
-实线展示请求与文件写入路径，虚线展示后台持久化和日志回收。快照按周期触发，也可由引擎内部接口调用。
-
-Go 网关负责 HTTP 参数校验、超时和连接复用；C++ 引擎负责请求调度、内存状态与持久化。TCP 使用带长度和状态码的二进制帧；`epoll` 管理连接收发，完整请求才进入工作队列，因此空闲连接和半包不会占住工作线程。
-
-图中展示 KV 请求主路径。状态查询使用独立且有容量上限的 RPC 池和引擎工作线程，让数据请求等待 WAL 时仍可观察积压。
+想了解实现，可从[提交语义](#成功响应意味着什么)和[存储设计](docs/design.md)开始；想评估工程质量，可查看[故障测试](#正确性如何验证)和[附带原始记录的性能分析](docs/performance-baseline.md)。当前面向单机、全量内存数据集；鉴权、TLS、事务与复制尚未实现。
 
 ## 快速开始
 
@@ -119,6 +95,32 @@ HTTP 404
 
 key 为 1–4096 字节，value 为 0–1 MiB。GET/DELETE 的 key 使用 URL 编码；读取值时只移除 `VALUE ` 前缀和响应末尾的一个换行，以保留值本身的空白。完整响应格式与错误码见 [HTTP API](docs/usage.md#http-api)。
 
+## 系统架构
+
+```mermaid
+flowchart TB
+    Client["curl / minikv-bench"] -->|HTTP| Gateway
+    subgraph Go["Go 网关"]
+        Gateway["JSON 校验 / HTTP 响应"] --> Pool["有界 RPC 连接池 / 请求截止时间"]
+    end
+    Pool -->|TCP 二进制帧| Reactor
+    subgraph CPP["C++ 存储引擎"]
+        Reactor["epoll：连接与收发缓冲"] --> Workers["有界任务队列 / 工作线程"]
+        Workers --> State["内存 KV / 有序 WAL 队列"]
+        State -.-> Flush["WAL 线程：批量写入与同步"]
+        State -.->|复制序列 S 的状态| Snapshot["快照线程：写出与安装"]
+    end
+    Flush --> WAL[("wal.v1")]
+    Snapshot --> Image[("snapshot.v1")]
+    Snapshot -.->|原子保留 S 之后的日志| WAL
+```
+
+实线展示请求与文件写入路径，虚线展示后台持久化和日志回收。快照按周期触发，也可由引擎内部接口调用。
+
+Go 网关负责 HTTP 参数校验、超时和连接复用；C++ 引擎负责请求调度、内存状态与持久化。TCP 使用带长度和状态码的二进制帧；`epoll` 管理连接收发，完整请求才进入工作队列，因此空闲连接和半包不会占住工作线程。
+
+图中展示 KV 请求主路径。状态查询使用独立且有容量上限的 RPC 池和引擎工作线程，让数据请求等待 WAL 时仍可观察积压。
+
 ## 运行状态
 
 服务运行时查询聚合状态：
@@ -171,51 +173,54 @@ make sanitize-test
 | HTTP 与 RPC 契约 | 参数、错误码、连接池、取消、超时与重试测试，启用 Go race 检查 | [main_test.go](go_server/main_test.go)、[client_test.go](go_server/client_test.go) |
 | 状态查询不改变提交语义 | 暂停 WAL / 快照、验证失败计数与重启；数据队列和 RPC 池占满时读取状态 | [存储统计测试](tests/stats_test.cpp)、[网关统计测试](go_server/stats_test.go)、[端到端测试](tests/integration_test.py) |
 | 两个进程协同工作 | TCP 分片与流水线、1 MiB value、RST、过载、停机响应、SIGKILL 后恢复 | [integration_test.py](tests/integration_test.py) |
+| 性能结果可复查 | 完整实验矩阵、失败与中断保留、报告计数与 LSN 对账、进程身份和采样区间验证 | [实验管理测试](tests/experiment_test.py)、[汇总测试](tests/experiment_summary_test.py) |
 
 [CI 工作流](.github/workflows/ci.yml) 配置了上述两组命令；第二组使用 AddressSanitizer / UndefinedBehaviorSanitizer 检查 C++。测试使用临时目录和本机临时端口，进程退出测试不等同于真实断电测试。
 
 单项测试、手动 ThreadSanitizer 检查和环境要求见[测试指南](docs/testing.md#运行回归检查)。
 
-## 可复现压测
+## 性能基线与复现
 
-使用快速开始中的演示数据目录，在引擎和网关运行时执行：
+已保存提交 `7c488b7` 的 **24 轮原始实验记录**：两种 WAL 模式 × 快照开关 × 3 次重复，分别开启和关闭周期采样。以下为开启采样的 12 轮结果，每组列出轮次中位数；全部完成，系统失败为 0。成功 QPS 包含符合协议的 `NOT_FOUND`，不代表全部命中。
+
+| 模式 | 自动快照 | 成功 QPS | 每轮 P99 中位数 |
+| --- | --- | ---: | ---: |
+| throughput | 关闭 | 32,011 | 2.505 ms |
+| throughput | 1,000 ms | 31,422 | 2.595 ms |
+| reliable | 关闭 | 5,132 | 10.023 ms |
+| reliable | 1,000 ms | 5,100 | 11.129 ms |
+
+条件：Xeon E3-1270 v3、Linux / NTFS3，客户端和服务端共用主机；每轮 100,000 请求、40 个闭环 worker、5,000 key、128 字节 value，20% PUT / 5% DELETE / 75% GET；引擎 20 线程、RPC 池 64、WAL batch 64 / flush 2 ms。资源和状态分别每 100 / 250 ms 采样，预置不计入测量。
+
+两种模式的确认语义不同，不能只看 QPS 判断优劣。可靠模式关闭快照时，各轮 P99 为 **10.022–15.523 ms**，存在慢轮次；同机负载也未完全受控。当前样本不足以证明快照成本可忽略，或把两批差值全部归为采样开销。完整范围、环境、等待分析与原始归档见[性能基线](docs/performance-baseline.md)。这些结果是特定条件下的观测，不是容量承诺。
+
+### 自己运行并核对结果
+
+以下使用实验程序的默认负载配置，自行启动临时服务、保存每轮独立数据并回收子进程，无需提前启动引擎或网关：
 
 ```sh
-./bin/minikv-bench \
-  -url http://127.0.0.1:8080/kv \
-  -workers 20 -requests 20000 -op mixed \
-  -keyspace 1000 -preload-count 1000 \
-  -write-ratio 20 -delete-ratio 5 \
-  -value-size 128 -seed 1
+make benchmark BENCH_ARGS='--output /tmp/minikv-readme-experiment'
+python3 benmark/summarize.py /tmp/minikv-readme-experiment
+python3 benmark/summarize.py /tmp/minikv-readme-experiment --format json > /tmp/minikv-readme-summary.json
 ```
 
-这会预热并修改 `k0` 至 `k999`。报告包含总 QPS、成功吞吐量（含正常未命中）、P50/P95/P99/P99.9、错误数和状态码分布。延迟统计包含失败请求，预热耗时不计入测量；预热失败或出现系统失败时，工具以非零状态退出。
+输出目录必须尚不存在。默认运行 4 种配置、每种 3 次，每轮 20,000 请求、20 个客户端 worker、1,000 key、4 个引擎线程；这与上表的负载不同。重跑上表配置见[基线复现步骤](docs/performance-baseline.md#原始记录与复查)。
 
-增加 `-format json` 可保存带版本的客户端配置、实际操作数和分类错误报告。负载按 seed 和请求编号生成，改变并发数不会改变请求内容的集合；并发交错与命中率仍可能变化。参数与报告字段见[压测报告指南](docs/benchmark-report.md)。
+汇总直接核对原始报告、配置、WAL 序列和观测样本，保留失败、缺失与中断轮次；可输出文本、JSON 或 CSV。不同输入目录分别统计，缺失资源值使用 `null`。快照开启却未在测量区间内观察到活动时，会明确标记证据不足。
 
-需要比较两种持久化模式和快照开关时，可让实验脚本自动启动服务，每轮使用新的数据目录，并保留原始报告、完整配置、日志及资源采样：
-
-```sh
-make benchmark
-```
-
-默认运行 4 种配置、每种重复 3 次，结果写入新建的 `benmark/results/<UTC 时间>/`。脚本只监听本机临时端口，结束时停止自己启动的进程；数据文件与失败记录一起保留。参数、产物和采样限制见[自动化性能实验](docs/benchmark-experiments.md)。
-
-比较时应固定提交、硬件、构建类型、持久化模式和负载，分别报告两种模式的结果，并保留全部轮次。当前工具采用固定并发的闭环负载，服务变慢时发送速率也会下降；判断过载容量还需要固定到达速率实验。
-
-实验记录要求、快照代价与指标口径见[测试与性能实验](docs/testing.md#运行一次可复现的压测)。`benmark/out/` 中的历史结果来自修复前版本，不能用作当前版本的性能结论。
+需要连接已有服务做单次压测，见[压测命令与指标口径](docs/testing.md#运行一次可复现的压测)；实验参数和产物见[自动化性能实验](docs/benchmark-experiments.md)。负载按 seed 和请求编号生成，改变并发数不会改变请求内容集合；当前采用闭环负载，评估固定外部到达速率下的容量仍需另做实验。`benmark/out/` 的旧数据来自修复前版本。
 
 ## 后续路线
 
-当前实现面向单机、全量内存数据集，没有内存淘汰或磁盘容量上限；队列限额不限制整个数据集大小。鉴权、TLS、事务和复制尚未实现。
+当前没有内存淘汰或磁盘容量上限，队列限额不限制整个数据集大小。后续优先完善现有单机设计的观测和验证，再扩大能力范围。
 
-接下来优先把现有设计变成可观测、可比较的工程结果：
+首批基线的样本显示，可靠模式的数据线程接近满载、任务队列经常非空，RPC 连接池尚有余量。这支持先检查持久化等待和线程占用；具体原因仍需通过改变单个参数的对照实验验证。
 
-| 优先级 | 方向 | 完成标准 |
+| 优先级 | 方向 | 验收方式 |
 | --- | --- | --- |
-| P1 | 完善运行观测 | 已提供队列、持久化进度和累计耗时；继续补充请求排队耗时、延迟分布，并测量采样开销 |
-| P2 | 建立性能基线 | 已有隔离实验与原始记录脚本；继续扩大负载、检查采样开销，联合比较成功吞吐量、尾延迟、错误率和内存用量 |
-| P3 | 评估快照与日志回收方案 | 在现有故障测试下比较分段 WAL、减少状态复制等方案，量化暂停时间、内存和写放大再决定实现 |
+| P1 | 定位可靠模式的等待成本 | 分别比较刷新间隔、batch 阈值和线程数；补充请求排队与持久化等待指标，同时验证确认语义 |
+| P2 | 扩大基线覆盖 | 增大数据集与运行时间、交错采样开关；保留每轮原始数据，比较尾延迟、失败率与资源开销 |
+| P3 | 评估快照与日志回收方案 | 比较分段 WAL、减少状态复制等方案；量化暂停时间、内存与写放大，并通过现有故障测试 |
 
 ## 文档与源码导航
 
@@ -227,6 +232,7 @@ make benchmark
 | 回归测试、数据竞争检查与性能实验 | [测试与性能实验](docs/testing.md) |
 | 压测参数、确定性负载与 JSON 结果 | [压测报告指南](docs/benchmark-report.md) |
 | 自动启动服务、重复实验与资源采样 | [自动化性能实验](docs/benchmark-experiments.md) |
+| 实测结果、等待分析与原始数据 | [性能基线](docs/performance-baseline.md) |
 | 内存状态、WAL、快照与恢复 | [cpp_engine/engine.cpp](cpp_engine/engine.cpp) |
 | TCP 连接管理与二进制编码 | [cpp_engine/server.cpp](cpp_engine/server.cpp)、[codec.h](cpp_engine/codec.h) |
 | HTTP 网关与 RPC 连接池 | [go_server/](go_server/) |
