@@ -11,7 +11,8 @@ make sanitize-test
 
 | 命令 | 实际执行内容 |
 | --- | --- |
-| `make test` | 构建 C++ 引擎、Go 网关与压测工具；运行四个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
+| `make test` | 检查文档，构建 C++ 引擎、Go 网关与压测工具；运行四个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
+| `make docs-test` | 检查 README 与 `docs/` 中的本地内联链接、标题锚点和 shell 示例语法，并验证检查器本身；只需 Python 3.8+ 与 Bash，不构建或启动服务 |
 | `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及四个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
@@ -20,6 +21,22 @@ make sanitize-test
 [CI 工作流](../.github/workflows/ci.yml) 在 push 和 pull request 时执行 `make test` 与 `make sanitize-test`。ThreadSanitizer 检查需要按下文手动运行。
 
 测试使用独立临时数据目录；网络测试在本机临时端口启动服务，因此执行环境必须允许监听本机端口。无需提前启动常驻的引擎或网关。
+
+## 维护文档
+
+只修改 README、使用说明或实验报告时，可先运行轻量检查：
+
+```sh
+make docs-test
+```
+
+[文档检查器](../tools/check_docs.py) 检查 `README.md` 和 `docs/` 下的 Markdown 文件：本地内联链接与图片的目标必须存在，指向 Markdown 标题的锚点必须有效，标为 `sh`、`bash` 或 `shell` 的围栏代码块须通过 `bash -n`。错误会标出文件与行号；链接可以指向源码、目录或归档文件。
+
+文档采用单行内联链接、内容为普通文字或行内代码的 `#` 标题，以及顶层围栏代码块；支持中文标题、仓库内相对路径与百分号编码。引用式链接、HTML 链接、下划线式标题和嵌套围栏会报错。检查器不实现完整 Markdown 渲染，多行链接、多行行内代码、缩进代码块和其他嵌入 HTML 不在覆盖范围内。外部链接不请求网络，Mermaid 图不做渲染验证。
+
+检查只验证 shell 语法，不执行代码块内容，也不验证命令是否能成功构建、启动服务或复现实验。修改上手流程、参数或依赖时，还应在相应环境实际运行；性能结论仍需对应原始结果。[检查器回归测试](../tests/docs_test.py) 覆盖失效链接与锚点、代码块隔离和不执行示例的边界。
+
+`make docs-test` 已纳入 `make test`，因此现有 CI 也会执行。直接运行 `python3 tools/check_docs.py` 可只检查文档；脚本根据自身位置定位仓库，不依赖调用时的工作目录。
 
 ## 每层测试验证什么
 
@@ -66,7 +83,7 @@ cmake -S cpp_engine -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
   '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
   -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
 cmake --build build-tsan --target engine_test snapshot_test stats_test async_test -j2
-TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
+(cd build-tsan && TSAN_OPTIONS=halt_on_error=1 ctest --output-on-failure)
 ```
 
 该命令覆盖存储、快照、运行状态和异步确认四个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
@@ -74,8 +91,8 @@ TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure
 如果 TSan 在测试启动前报告 `unexpected memory mapping`，在支持 `setarch` 的 x86_64 Linux 环境中，可以仅对本次测试进程及其子进程关闭地址随机化后重试：
 
 ```sh
-setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 \
-  ctest --test-dir build-tsan --output-on-failure
+(cd build-tsan && setarch x86_64 -R env TSAN_OPTIONS=halt_on_error=1 \
+  ctest --output-on-failure)
 ```
 
 这不会修改系统级 ASLR 配置。如果环境禁止 `setarch` 修改进程属性，需要在允许该操作的环境中运行；此类启动失败无法得出测试是否通过的结论。

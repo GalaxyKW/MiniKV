@@ -3,7 +3,7 @@ BUILD_TYPE ?= RelWithDebInfo
 JOBS ?= 2
 BENCH_ARGS ?=
 
-.PHONY: all engine go test unit-test integration-test experiment-test benchmark sanitize-test clean
+.PHONY: all engine go test docs-test unit-test integration-test experiment-test benchmark sanitize-test clean
 
 all: engine go
 
@@ -17,7 +17,7 @@ go:
 	go build -o bin/minikv-bench ./benmark
 
 unit-test: all
-	ctest --test-dir $(BUILD_DIR) --output-on-failure
+	cd "$(BUILD_DIR)" && ctest --output-on-failure
 	go test -race -timeout 60s ./...
 
 integration-test: all
@@ -26,15 +26,19 @@ integration-test: all
 experiment-test:
 	python3 -m unittest discover -s tests -p 'experiment*_test.py' -v
 
+docs-test:
+	python3 -m unittest discover -s tests -p 'docs_test.py' -v
+	python3 tools/check_docs.py
+
 benchmark: all
 	python3 benmark/experiment.py --engine $(abspath $(BUILD_DIR))/engine $(BENCH_ARGS)
 
-test: unit-test integration-test experiment-test
+test: docs-test unit-test integration-test experiment-test
 
 sanitize-test: go
 	cmake -S cpp_engine -B build-asan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DMINIKV_SANITIZERS=ON
 	cmake --build build-asan -j$(JOBS)
-	ctest --test-dir build-asan --output-on-failure
+	cd build-asan && ctest --output-on-failure
 	MINIKV_TEST_ENGINE=$(CURDIR)/build-asan/engine python3 tests/integration_test.py -v
 
 clean:

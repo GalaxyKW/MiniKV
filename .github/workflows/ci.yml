@@ -1,4 +1,4 @@
-name: Build and recovery tests
+name: Documentation, build and recovery tests
 
 on:
   push:

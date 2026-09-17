@@ -6,7 +6,7 @@
 
 ## 构建与启动
 
-构建需要 Linux、支持 C++17 的编译器、CMake 3.16+、Make 和 Go 1.22+。引擎依赖 Linux 的 `epoll`、`eventfd` 和 `flock`。Go 程序没有第三方模块依赖；Python 3 用于端到端测试，Matplotlib 仅在绘图时需要。
+构建需要 Linux、支持 C++17 的编译器、CMake 3.16+、Make 和 Go 1.22+。引擎依赖 Linux 的 `epoll`、`eventfd` 和 `flock`。Go 程序没有第三方模块依赖；测试与自动化实验需要 Python 3.8+，文档检查另需 Bash，Matplotlib 仅在绘图时需要。
 
 ```sh
 make JOBS=4

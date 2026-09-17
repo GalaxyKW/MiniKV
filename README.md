@@ -19,7 +19,7 @@ MiniKV 从内存数据结构、二进制协议到 HTTP 服务实现了一套单�
 
 ## 快速开始
 
-需要 Linux、C++17 编译器、CMake 3.16+、Make、Go 1.22+ 和 curl；测试与自动化实验另需 Python 3.8+。引擎使用 Linux 的 `epoll`、`eventfd` 与 `flock`，Go 程序没有第三方模块依赖。
+需要 Linux、C++17 编译器、CMake 3.16+、Make、Go 1.22+ 和 curl；测试与自动化实验另需 Python 3.8+，文档检查另需 Bash。引擎使用 Linux 的 `epoll`、`eventfd` 与 `flock`，Go 程序没有第三方模块依赖。
 
 **构建**，后续命令均在仓库根目录执行：
 
@@ -155,6 +155,8 @@ make sanitize-test
 | 指标和实验报告可以信任 | 状态不改变提交语义；报告计数与 LSN 对账，保留失败与缺失轮次：[统计测试](tests/stats_test.cpp)、[实验测试](tests/experiment_test.py)、[汇总测试](tests/experiment_summary_test.py) |
 
 [CI](.github/workflows/ci.yml) 配置了这两组命令：普通回归包含 Go race 检查，sanitizer 回归使用 C++ AddressSanitizer / UndefinedBehaviorSanitizer。测试使用临时数据目录和本机临时端口；进程退出测试不等同于真实断电测试。单项检查、手动 ThreadSanitizer 和各测试的覆盖边界见[测试指南](docs/testing.md)。
+
+只修改文档时可运行 `make docs-test`，检查本地链接、标题锚点与 shell 示例语法；它也包含在 `make test` 中。检查不会启动服务或执行示例命令，不能替代实际运行验证，支持的 Markdown 写法见[文档维护说明](docs/testing.md#维护文档)。
 
 ## 性能基线与复现
 
