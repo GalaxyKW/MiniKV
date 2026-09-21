@@ -32,7 +32,7 @@ make docs-test
 
 [文档检查器](../tools/check_docs.py) 检查 `README.md` 和 `docs/` 下的 Markdown 文件：本地内联链接与图片的目标必须存在，指向 Markdown 标题的锚点必须有效，标为 `sh`、`bash` 或 `shell` 的围栏代码块须通过 `bash -n`。错误会标出文件与行号；链接可以指向源码、目录或归档文件。
 
-文档采用单行内联链接、内容为普通文字或行内代码的 `#` 标题，以及顶层围栏代码块；支持中文标题、仓库内相对路径与百分号编码。引用式链接、HTML 链接、下划线式标题和嵌套围栏会报错。检查器不实现完整 Markdown 渲染，多行链接、多行行内代码、缩进代码块和其他嵌入 HTML 不在覆盖范围内。外部链接不请求网络，Mermaid 图不做渲染验证。
+文档采用单行内联链接、内容为普通文字或行内代码的 `#` 标题，以及顶层围栏代码块；支持中文标题、仓库内相对路径与百分号编码。本地链接含控制字符时会报错，避免 URL 解析时静默丢弃字符、检查到其他文件。引用式链接、HTML 链接、下划线式标题和嵌套围栏会报错。检查器不实现完整 Markdown 渲染，多行链接、多行行内代码、缩进代码块和其他嵌入 HTML 不在覆盖范围内。外部链接不请求网络，Mermaid 图不做渲染验证。
 
 检查只验证 shell 语法，不执行代码块内容，也不验证命令是否能成功构建、启动服务或复现实验。修改上手流程、参数或依赖时，还应在相应环境实际运行；性能结论仍需对应原始结果。[检查器回归测试](../tests/docs_test.py) 覆盖失效链接与锚点、代码块隔离和不执行示例的边界。
 
@@ -49,7 +49,7 @@ make docs-test
 | 快照输出与恢复 | 跨多个输出缓冲的小记录、大记录、空值与 NUL，逐记录 CRC 对账并在 WAL 为空时恢复；真实快照短写/EFBIG 后保留旧文件、继续可靠写入并重启 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 快照计量 | 捕获持锁计时不包含门控 WAL 同步；快照与后缀写入量和实际文件对账；部分写、同步或安装后失败保留准确计数 | [stats_test.cpp](../tests/stats_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 故障边界 | WAL/快照 I/O 故障注入、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
-| HTTP 与 RPC | 参数与状态码映射、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
+| HTTP 与 RPC | 参数与状态码映射、非法查询串不执行后端操作、合法慢上传的响应预算、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
 | 运行状态 | WAL 队列与写盘批次区分、容量与可靠确认等待、任务排队计时、失败唤醒与重启归零；RPC 等待与重试、旧引擎缺字段的透传语义 | [engine_test.cpp](../tests/engine_test.cpp)、[stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
 | 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理；并发聚合中成功、失败、未命中与网络错误的计数守恒 | [main_test.go](../benmark/main_test.go) |
 | 可复现实验 | 参数边界与无副作用解析、跨 worker 请求集合、低分配生成、精确分位数与大均值、JSON 输出与失败分类 | [config_test.go](../benmark/config_test.go)、[workload_test.go](../benmark/workload_test.go)、[report_test.go](../benmark/report_test.go) |
@@ -57,7 +57,7 @@ make docs-test
 | 实验观测边界 | 持续小块响应仍受总截止时间限制、正文大小与截断检查；排除预置和跨测量边界的快照，区分 RSS 样本与生命周期峰值 | [experiment_http_test.py](../tests/experiment_http_test.py)、[experiment_observations_test.py](../tests/experiment_observations_test.py) |
 | 实验汇总 | 完整计划与失败轮次、配置和日志序列对账、资源进程身份、缺失值与多格式输出；搬移后的归档仍可只读复查 | [experiment_summary_test.py](../tests/experiment_summary_test.py) |
 | 快照离线分析 | 共同空闲窗口、预置与忙碌端点排除、覆盖门槛、旧字段缺失与真实零值、uint64 与累计倒退、最大值口径；保留无效轮次且不修改归档 | [experiment_snapshot_report_test.py](../tests/experiment_snapshot_report_test.py) |
-| 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、1 MiB value、客户端 RST、非法帧、队列过载、停机响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
+| 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、半关闭连接的发送背压、文件描述符耗尽后的接入恢复、1 MiB value、客户端 RST、非法帧、队列过载、停机响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
 
 端到端测试还验证：可靠确认释放 worker，但继续占用请求名额；WAL 容量阻塞 worker、数据队列和网关 RPC 名额时，`/stats` 仍可返回；断连后旧请求不会释放名额供重连绕过限制；网络停机宽限结束后，异步回调仍能排空且数据可恢复。引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
 

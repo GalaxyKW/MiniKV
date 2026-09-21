@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -73,10 +74,16 @@ func newKVHandler(client commandClient) http.HandlerFunc {
 				return
 			}
 			request = rpcRequest{op: opPut, key: body.Key, value: body.Value}
-		case http.MethodGet:
-			request = rpcRequest{op: opGet, key: r.URL.Query().Get("key")}
-		case http.MethodDelete:
-			request = rpcRequest{op: opDelete, key: r.URL.Query().Get("key")}
+		case http.MethodGet, http.MethodDelete:
+			query, err := url.ParseQuery(r.URL.RawQuery)
+			if err != nil {
+				http.Error(w, "Invalid query string", http.StatusBadRequest)
+				return
+			}
+			request = rpcRequest{op: opGet, key: query.Get("key")}
+			if r.Method == http.MethodDelete {
+				request.op = opDelete
+			}
 		default:
 			w.Header().Set("Allow", "POST, GET, DELETE")
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -134,6 +141,21 @@ func newKVHandler(client commandClient) http.HandlerFunc {
 	}
 }
 
+func newHTTPServer(address string, handler http.Handler, rpcTimeout time.Duration) *http.Server {
+	const readTimeout = 15 * time.Second
+	return &http.Server{
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       readTimeout,
+		// net/http starts this deadline after the headers, before reading the
+		// body. Reserve the full upload and RPC budgets before response writing.
+		WriteTimeout:   readTimeout + rpcTimeout + 5*time.Second,
+		IdleTimeout:    30 * time.Second,
+		MaxHeaderBytes: 64 * 1024,
+	}
+}
+
 func run() error {
 	size, err := envInt("MINIKV_RPC_POOL_SIZE", 64, 1, 65536)
 	if err != nil {
@@ -152,15 +174,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/kv", newKVHandler(client))
 	mux.HandleFunc("/stats", newStatsHandler(statsClient, client, time.Now()))
-	server := &http.Server{
-		Addr:              envString("MINIKV_HTTP_ADDR", ":8080"),
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      time.Duration(timeoutMS)*time.Millisecond + 5*time.Second,
-		IdleTimeout:       30 * time.Second,
-		MaxHeaderBytes:    64 * 1024,
-	}
+	server := newHTTPServer(envString("MINIKV_HTTP_ADDR", ":8080"), mux, time.Duration(timeoutMS)*time.Millisecond)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan error, 1)

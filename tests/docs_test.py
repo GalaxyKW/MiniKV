@@ -111,6 +111,56 @@ class DocumentationTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("missing heading fragment #{}".format(incorrect), result.stderr)
 
+    def test_link_entities_do_not_retarget_literal_or_escaped_ampersands(self):
+        cases = (
+            ("copy&copy.png", "copy&copy.png", "copy©.png"),
+            (r"copy\&amp;.png", "copy&amp;.png", "copy&.png"),
+            ("copy&notit;.png", "copy&notit;.png", "copy¬it;.png"),
+            ("copy&amp;amp;.png", "copy&amp;.png", "copy&.png"),
+            ("copy&amp;.png", "copy&.png", "copy&amp;.png"),
+            ("copy&#xFFFF;.png", "copy\uffff.png", "copy.png"),
+            ("copy&#0;.png", "copy\ufffd.png", "copy.png"),
+        )
+        for number, (raw, actual, wrong) in enumerate(cases):
+            with self.subTest(destination=raw):
+                directory = "assets/{}".format(number)
+                self.write("README.md", "# Root\n[link]({}/{})\n".format(directory, raw))
+                self.write("{}/{}".format(directory, wrong), "wrong destination")
+                result = self.check()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("README.md:2: missing local destination", result.stderr)
+                self.write("{}/{}".format(directory, actual), "actual destination")
+                self.assert_passes(self.check())
+
+    def test_control_references_cannot_be_silently_removed_from_links(self):
+        self.write("copy.png", "would match after stripping the control")
+        self.write("copy€.png", "would match HTML's legacy numeric remapping")
+        for encoded in ("&#1;", "&#9;", "&#10;", "&#x80;", "%09", "%0A"):
+            with self.subTest(encoded=encoded):
+                self.write("README.md", "# Root\n[link](copy{}.png)\n".format(encoded))
+                result = self.check()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("control characters in local URLs are unsupported", result.stderr)
+
+    def test_heading_entities_follow_markdown_escape_and_semicolon_rules(self):
+        cases = (
+            ("Copy &copy", "copy-copy", "copy-"),
+            (r"Copy \&amp;", "copy-amp", "copy-"),
+            ("Copy &notit;", "copy-notit", "copy-it"),
+            ("Copy &#00000065;", "copy-00000065", "copy-a"),
+            ("Copy &#x0000041;", "copy-x0000041", "copy-a"),
+            ("Copy &#65;", "copy-a", "copy-65"),
+            ("Copy &#x41;", "copy-a", "copy-x41"),
+        )
+        for heading, correct, incorrect in cases:
+            with self.subTest(heading=heading):
+                self.write("README.md", "## {}\n[correct](#{})\n".format(heading, correct))
+                self.assert_passes(self.check())
+                self.write("README.md", "## {}\n[incorrect](#{})\n".format(heading, incorrect))
+                result = self.check()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("missing heading fragment #{}".format(incorrect), result.stderr)
+
     def test_code_fences_and_inline_code_hide_fake_links_and_headings(self):
         self.write("README.md", """# Root
 `[literal](missing.md)` and ``[literal](other.md)``

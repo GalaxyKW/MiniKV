@@ -15,7 +15,7 @@ never tested. Use inline code or fences for literal Markdown examples.
 """
 
 import argparse
-import html
+from html.entities import html5
 import os
 from pathlib import Path
 import re
@@ -28,13 +28,32 @@ from urllib.parse import unquote, urlsplit
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+(.*)|[ \t]*)$")
 ESCAPE = re.compile(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\]^_`{|}~\\])")
+MARKDOWN_TEXT = re.compile(
+    ESCAPE.pattern + r"|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
 TITLE = re.compile(r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))[ \t]*\)''')
+
+
+def decode_text(text):
+    """Decode Markdown escapes/entities once, without HTML's legacy recovery."""
+    def replace(match):
+        if match.group(1) is not None:
+            return match.group(1)
+        entity = match.group()
+        if entity.startswith("&#"):
+            digits = entity[2:-1]
+            value = int(digits[1:], 16) if digits[0] in "xX" else int(digits)
+            if value == 0 or value > 0x10ffff or 0xd800 <= value <= 0xdfff:
+                return "\ufffd"
+            return chr(value)
+        return html5.get(entity[1:], entity)
+
+    return MARKDOWN_TEXT.sub(replace, text)
 
 
 def code_spans(line, keep_text=False):
     """Mask same-line code spans, or render heading text with literal code bodies."""
     def outside(text):
-        return html.unescape(ESCAPE.sub(r"\1", text)) if keep_text else text
+        return decode_text(text) if keep_text else text
 
     runs = list(re.finditer(r"`+", line))
     result, start, i = [], 0, 0
@@ -216,19 +235,25 @@ class Checker:
             except ValueError as exc:
                 self.error(path, number, str(exc))
                 break
-            yield html.unescape(ESCAPE.sub(r"\1", target))
+            yield decode_text(target)
 
     def check_link(self, path, number, target):
         if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target) or target.startswith("//"):
             return
         self.links += 1
         try:
+            # urlsplit silently strips tabs/newlines and leading C0 controls.
+            # Reject these paths instead of checking a different destination.
+            if any(unicodedata.category(char) == "Cc" for char in target):
+                raise ValueError("control characters in local URLs are unsupported")
             url = urlsplit(target)
             if url.query or "?" in target.partition("#")[0]:
                 raise ValueError("local URL queries are unsupported")
             if re.search(r"%(?![0-9a-fA-F]{2})", target):
                 raise ValueError("invalid percent escape")
             name, fragment = unquote(url.path, errors="strict"), unquote(url.fragment, errors="strict")
+            if any(unicodedata.category(char) == "Cc" for char in name + fragment):
+                raise ValueError("control characters in local URLs are unsupported")
             if name.startswith("/"):
                 raise ValueError("absolute local paths are unsupported; use relative paths")
             destination_path = (path.parent / name).resolve() if name else path

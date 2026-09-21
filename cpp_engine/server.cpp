@@ -233,6 +233,10 @@ private:
             sink_->check_notification();
             if (stopping.load(std::memory_order_relaxed) && !draining_) begin_shutdown();
             if (draining_ && (clients_.empty() || Clock::now() >= shutdown_deadline_)) break;
+            if (!draining_ && accept_paused_ && Clock::now() >= accept_retry_at_) {
+                add_fd(listen_fd_, 1, EPOLLIN);
+                accept_paused_ = false;
+            }
             if (!ready_completions_.empty()) finish_requests();
             const int count = ::epoll_wait(epoll_fd_, events.data(), static_cast<int>(events.size()), 100);
             if (count < 0) {
@@ -242,7 +246,7 @@ private:
             for (int i = 0; i < count; ++i) {
                 const uint64_t id = events[i].data.u64;
                 if (id == 1) {
-                    if (!draining_) accept_clients();
+                    if (!draining_ && !accept_paused_) accept_clients();
                     continue;
                 }
                 if (id == 2) { finish_requests(); continue; }
@@ -304,7 +308,11 @@ private:
     void arm(uint64_t id, uint32_t flags) {
         auto& client = clients_.at(id);
         epoll_event event{};
-        event.events = flags | EPOLLRDHUP;
+        // A peer may finish sending while it still expects a response. RDHUP
+        // remains ready forever, so monitor it only while receiving; otherwise
+        // a blocked send would spin instead of waiting for output capacity.
+        event.events = flags;
+        if (flags & EPOLLIN) event.events |= EPOLLRDHUP;
         event.data.u64 = id;
         if (::epoll_ctl(epoll_fd_, client.registered ? EPOLL_CTL_MOD : EPOLL_CTL_ADD, client.fd, &event) != 0) {
             close_client(id);
@@ -328,7 +336,15 @@ private:
             const int fd = ::accept4(listen_fd_, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
             if (fd < 0) {
                 if (errno == EINTR) continue;
-                if (errno != EAGAIN && errno != EWOULDBLOCK) std::cerr << "accept: " << std::strerror(errno) << '\n';
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    std::cerr << "accept: " << std::strerror(errno) << '\n';
+                    // EMFILE/ENFILE (and other resource errors) can leave the
+                    // listener readable. Pause only accepts so existing clients
+                    // and idle expiry can free resources without an error loop.
+                    if (::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, listen_fd_, nullptr) != 0) network_error("epoll pause accept");
+                    accept_paused_ = true;
+                    accept_retry_at_ = Clock::now() + std::chrono::milliseconds(100);
+                }
                 return;
             }
             if (clients_.size() >= max_connections_) {
@@ -573,6 +589,8 @@ private:
     std::chrono::milliseconds idle_timeout_;
     bool draining_ = false;
     bool shutdown_complete_ = false;
+    bool accept_paused_ = false;
+    Clock::time_point accept_retry_at_;
     Clock::time_point shutdown_deadline_;
     int listen_fd_ = -1, epoll_fd_ = -1;
     uint64_t next_id_ = 3;

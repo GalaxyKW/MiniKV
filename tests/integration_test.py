@@ -6,6 +6,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import resource
 import select
 import socket
 import struct
@@ -85,11 +86,15 @@ class MiniKVIntegration(unittest.TestCase):
         self.start_engine()
         self.start_gateway()
 
-    def launch(self, binary, env, port, name):
+    def launch(self, binary, env, port, name, nofile_limit=None):
         log_path = Path(self.directory.name) / f"{name}.log"
         log = log_path.open("ab")
         self.log_files.append(log)
-        process = subprocess.Popen([str(binary)], env=env, stdout=log, stderr=log, cwd=ROOT)
+        def limit_files():
+            resource.setrlimit(resource.RLIMIT_NOFILE, (nofile_limit, nofile_limit))
+
+        process = subprocess.Popen([str(binary)], env=env, stdout=log, stderr=log, cwd=ROOT,
+                                   preexec_fn=limit_files if nofile_limit is not None else None)
         # Register cleanup before waiting for startup, including failed startup.
         setattr(self, name, process)
         deadline = time.monotonic() + 8
@@ -103,8 +108,8 @@ class MiniKVIntegration(unittest.TestCase):
                 time.sleep(0.02)
         self.fail(f"{name} did not start: {log_path.read_text(errors='replace')}")
 
-    def start_engine(self):
-        self.launch(ENGINE, self.engine_env, self.engine_port, "engine")
+    def start_engine(self, nofile_limit=None):
+        self.launch(ENGINE, self.engine_env, self.engine_port, "engine", nofile_limit=nofile_limit)
 
     def start_gateway(self):
         self.launch(GATEWAY, self.gateway_env, self.http_port, "gateway")
@@ -477,6 +482,87 @@ class MiniKVIntegration(unittest.TestCase):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
         self.assertEqual(self.request("GET", "missing"), (404, b"NOT_FOUND\n"))
         self.assertIsNone(self.engine.poll(), "client reset killed the engine")
+
+    def test_half_closed_slow_reader_waits_without_spinning_and_drains_replies(self):
+        self.stop("gateway")
+        self.stop("engine")
+        self.engine_env.update({"MINIKV_WAL_MODE": "throughput", "MINIKV_SNAPSHOT_INTERVAL_MS": "0"})
+        self.start_engine()
+        self.start_gateway()
+        value = b"v" * (1024 * 1024)
+        self.assertEqual(self.request("POST", "slow-reader", value.decode()), (200, b"OK\n"))
+        with socket.socket() as sock:
+            sock.settimeout(10)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+            sock.connect(("127.0.0.1", self.engine_port))
+            sock.sendall(frame(2, b"slow-reader") * 8)
+            sock.shutdown(socket.SHUT_WR)
+            stats = self.wait_stats(lambda s: s["server"]["requests_started_total"] >= 3,
+                                    "pipelined reads did not start")
+            # Eight replies cannot fit the bounded receive window and server
+            # send buffer. Wait for request progress to stop before measuring.
+            deadline = time.monotonic() + 2
+            while True:
+                started = stats["server"]["requests_started_total"]
+                self.assertLess(started, 9, "all replies fit without exercising send backpressure")
+                time.sleep(0.05)
+                code, stats = self.runtime_stats()
+                self.assertEqual(code, 200)
+                if stats["server"]["requests_started_total"] == started:
+                    break
+                self.assertLess(time.monotonic(), deadline, "reply output never became blocked")
+
+            def engine_cpu_seconds():
+                fields = Path(f"/proc/{self.engine.pid}/stat").read_text().rsplit(")", 1)[1].split()
+                return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+
+            cpu_before, wall_before = engine_cpu_seconds(), time.monotonic()
+            time.sleep(0.6)
+            elapsed = time.monotonic() - wall_before
+            cpu_used = engine_cpu_seconds() - cpu_before
+            self.assertLess(cpu_used, max(0.2, elapsed / 2),
+                            "half-closed socket spun while waiting for the client to read")
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+            for _ in range(8):
+                self.assertEqual(read_response(sock), (1, value))
+            self.assertEqual(sock.recv(1), b"", "half-close did not close after all replies")
+
+    def test_accept_descriptor_exhaustion_backs_off_and_recovers(self):
+        self.stop("gateway")
+        self.stop("engine")
+        self.engine_env.update({"MINIKV_SNAPSHOT_INTERVAL_MS": "0", "MINIKV_MAX_CONNECTIONS": "128"})
+        self.start_engine(nofile_limit=32)
+        log = Path(self.directory.name) / "engine.log"
+        with self.rpc_socket() as existing, contextlib.ExitStack() as stack:
+            existing.sendall(frame(2, b"missing"))
+            self.assertEqual(read_response(existing), (2, b""))
+            for _ in range(60):
+                stack.enter_context(self.rpc_socket())
+            deadline = time.monotonic() + 2
+            while b"Too many open files" not in log.read_bytes():
+                self.assertLess(time.monotonic(), deadline, "descriptor exhaustion was not reached")
+                time.sleep(0.01)
+            size_before = log.stat().st_size
+            time.sleep(0.5)
+            self.assertLess(log.stat().st_size - size_before, 4096,
+                            "descriptor exhaustion produced an unbounded accept error loop")
+            existing.sendall(frame(2, b"missing"))
+            self.assertEqual(read_response(existing), (2, b""), "accept backoff blocked an existing client")
+            stack.close()
+            with self.rpc_socket() as recovered:
+                recovered.sendall(frame(2, b"missing"))
+                self.assertEqual(read_response(recovered), (2, b""),
+                                 "new connections did not recover after descriptors became available")
+            # Shut down during a second exhaustion episode: the retry deadline
+            # must not register a listener that begin_shutdown already closed.
+            size_before = log.stat().st_size
+            for _ in range(60):
+                stack.enter_context(self.rpc_socket())
+            deadline = time.monotonic() + 2
+            while log.stat().st_size == size_before:
+                self.assertLess(time.monotonic(), deadline, "second descriptor exhaustion was not reached")
+                time.sleep(0.01)
+            self.stop("engine")
 
     def test_invalid_frames_and_truncated_requests(self):
         bad = struct.pack("!4sB3xII", b"MKV1", 1, 4097, 0)
