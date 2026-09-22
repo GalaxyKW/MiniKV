@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"sync/atomic"
-	"time"
 )
 
 // Counters contain no request keys, values, or unbounded labels. Each atomic
@@ -119,8 +118,9 @@ type serverStats struct {
 }
 
 type gatewayStats struct {
-	UptimeSeconds float64  `json:"uptime_seconds"`
-	RPC           rpcStats `json:"rpc"`
+	UptimeSeconds float64          `json:"uptime_seconds"`
+	RPC           rpcStats         `json:"rpc"`
+	HTTP          gatewayHTTPStats `json:"http"`
 }
 
 type runtimeStats struct {
@@ -190,7 +190,7 @@ func decodeStats(payload string) (runtimeStats, error) {
 	return result, nil
 }
 
-func newStatsHandler(client commandClient, dataClient *rpcClient, started time.Time) http.HandlerFunc {
+func newStatsHandler(client commandClient, localStats func() gatewayStats) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet {
@@ -219,16 +219,21 @@ func newStatsHandler(client commandClient, dataClient *rpcClient, started time.T
 				code = http.StatusBadGateway
 			}
 		}
-		result.Gateway = &gatewayStats{UptimeSeconds: time.Since(started).Seconds(), RPC: dataClient.stats()}
-		payload, err := json.Marshal(result)
-		if err != nil {
-			http.Error(w, "Cannot encode runtime stats", http.StatusInternalServerError)
-			return
-		}
-		payload = append(payload, '\n')
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
-		w.WriteHeader(code)
-		_, _ = w.Write(payload)
+		writeRuntimeStats(w, code, result, localStats())
 	}
+}
+
+func writeRuntimeStats(w http.ResponseWriter, code int, result runtimeStats, gateway gatewayStats) {
+	result.Gateway = &gateway
+	payload, err := json.Marshal(result)
+	if err != nil {
+		http.Error(w, "Cannot encode runtime stats", http.StatusInternalServerError)
+		return
+	}
+	payload = append(payload, '\n')
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+	w.WriteHeader(code)
+	_, _ = w.Write(payload)
 }

@@ -11,7 +11,7 @@ MiniKV 从内存数据结构、二进制协议到 HTTP 服务实现了一套单�
 | 关注点 | 已实现的能力 | 阅读入口 |
 | --- | --- | --- |
 | 持久化与恢复 | 两种确认语义、批量同步、CRC 与序列检查、快照及 WAL 回收 | [存储设计](docs/design.md) |
-| 并发与资源控制 | `epoll` 收发、有界队列、异步可靠确认、断连后保留请求名额、可选数据字节上限 | [请求生命周期](docs/design.md#异步可靠确认与请求生命周期)、[数据容量](docs/design.md#数据集容量) |
+| 并发与资源控制 | HTTP 解码前接纳限制、`epoll` 收发、有界队列、异步可靠确认、断连后保留请求名额、可选数据字节上限 | [网关配置](docs/usage.md#网关)、[请求生命周期](docs/design.md#异步可靠确认与请求生命周期)、[数据容量](docs/design.md#数据集容量) |
 | 工程验证 | I/O 故障注入、安装边界退出、重启对账、跨进程与数据竞争检查 | [测试指南](docs/testing.md) |
 | 性能分析 | 独立状态查询、确定性负载、重复实验、原始结果与资源采样归档 | [版本对照](docs/performance-async-controls.md) |
 
@@ -74,7 +74,7 @@ VALUE MiniKV
 flowchart TB
     Client["curl / minikv-bench"] -->|HTTP| Gateway
     subgraph Go["Go HTTP 网关"]
-        Gateway["参数校验 / 状态码映射"] --> Pool["有界 RPC 池 / 请求截止时间"]
+        Gateway["有界 HTTP 接纳 / 参数校验 / 状态码映射"] --> Pool["有界 RPC 池 / 请求截止时间"]
     end
     Pool -->|TCP 二进制帧| Reactor
     subgraph CPP["C++ 存储引擎"]
@@ -93,7 +93,7 @@ flowchart TB
     Snapshot -.->|原子保留 S 之后的日志| WAL
 ```
 
-Go 负责 HTTP、超时和连接复用；C++ 负责调度、内存状态与持久化。完整二进制帧才进入任务队列，空闲连接和半包不会占住 worker；同一连接按顺序处理请求。
+Go 负责 HTTP、超时和连接复用；C++ 负责调度、内存状态与持久化。网关先取得 HTTP 接纳名额，再读取正文并调用 RPC；满额返回 503，避免大请求在 RPC 池前无限积压。引擎只将完整二进制帧送入任务队列，空闲连接和半包不会占住 worker；同一连接按顺序处理请求。
 
 图中实线表示请求、结果与文件写入，虚线表示后台协作。throughput 由 worker 直接投递结果，不启动可靠完成线程；reliable 只有目标序列尚未持久化时才登记等待项。两条响应路径共用请求名额和完成队列。
 

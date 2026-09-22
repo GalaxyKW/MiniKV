@@ -88,6 +88,9 @@ class MiniKVIntegration(unittest.TestCase):
             "MINIKV_HTTP_ADDR": f"127.0.0.1:{self.http_port}",
             "MINIKV_RPC_POOL_SIZE": "16",
             "MINIKV_RPC_TIMEOUT_MS": "2000",
+            # Use the configured pool size as the default even when a test
+            # restarts with a smaller pool; do not inherit a host override.
+            "MINIKV_HTTP_MAX_INFLIGHT": "",
         })
         self.start_engine()
         self.start_gateway()
@@ -186,6 +189,57 @@ class MiniKVIntegration(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, message)
             time.sleep(0.005)
 
+    def test_http_admission_precedes_body_reads_and_recovers_after_disconnect(self):
+        self.stop("gateway")
+        self.gateway_env["MINIKV_HTTP_MAX_INFLIGHT"] = "1"
+        self.start_gateway()
+        with socket.create_connection(("127.0.0.1", self.http_port), timeout=4) as upload:
+            # The incomplete upload must hold HTTP admission without using an
+            # RPC slot. No payload is sent, so only admission can reject the
+            # requests below before the server's 15-second body timeout.
+            upload.sendall(b"POST /kv HTTP/1.1\r\nHost: localhost\r\n"
+                           b"Content-Type: application/json\r\nContent-Length: 40\r\n\r\n")
+            stats = self.wait_stats(lambda s: s["gateway"]["http"]["data"]["inflight"] == 1,
+                                    "incomplete upload did not acquire HTTP admission")
+            self.assertEqual(stats["gateway"]["http"]["data"],
+                             {"capacity": 1, "inflight": 1, "rejected_total": 0})
+            self.assertEqual(stats["gateway"]["http"]["stats"],
+                             {"capacity": 1, "inflight": 1, "rejected_total": 0})
+            self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 0)
+            self.assertEqual(stats["gateway"]["rpc"]["pool_in_use"], 0)
+            self.assertEqual(stats["server"]["requests_started_total"], 0)
+            # Cover both the small-body path that net/http might otherwise
+            # drain before flushing and a large upload that must not decode.
+            for length in (40, 1024 * 1024):
+                with self.subTest(content_length=length), socket.create_connection(
+                        ("127.0.0.1", self.http_port), timeout=4) as rejected:
+                    rejected.sendall(("POST /kv HTTP/1.1\r\nHost: localhost\r\n"
+                                      "Content-Type: application/json\r\n"
+                                      f"Content-Length: {length}\r\n\r\n").encode("ascii"))
+                    response = http.client.HTTPResponse(rejected)
+                    try:
+                        response.begin()
+                        self.assertEqual(response.status, 503)
+                        self.assertEqual(response.getheader("Connection"), "close")
+                        self.assertEqual(response.read(), b"Gateway request capacity exhausted\n")
+                    finally:
+                        response.close()
+            code, stats = self.runtime_stats()
+            self.assertEqual(code, 200)
+            self.assertEqual(stats["gateway"]["http"]["data"],
+                             {"capacity": 1, "inflight": 1, "rejected_total": 2})
+            self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 0)
+        stats = self.wait_stats(lambda s: s["gateway"]["http"]["data"]["inflight"] == 0,
+                                "disconnected upload retained HTTP admission")
+        self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 0)
+        self.assertEqual(self.request("POST", "recovered", "value"), (200, b"OK\n"))
+        self.assertEqual(self.request("GET", "recovered"), (200, b"VALUE value\n"))
+        stats = self.wait_stats(lambda s: s["gateway"]["http"]["data"]["inflight"] == 0,
+                                "completed request retained HTTP admission")
+        self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 2)
+        self.assertEqual(stats["gateway"]["http"]["data"]["rejected_total"], 2)
+        self.assertEqual(stats["gateway"]["http"]["stats"]["rejected_total"], 0)
+
     def test_runtime_stats_and_recovery(self):
         self.assertEqual(self.request("POST", "private-key", "private-value"), (200, b"OK\n"))
         self.assertEqual(self.request("GET", "private-key"), (200, b"VALUE private-value\n"))
@@ -235,6 +289,10 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 2)
         self.assertEqual(stats["gateway"]["rpc"]["errors_total"], 0)
         self.assertEqual(stats["gateway"]["rpc"]["pool_capacity"], 16)
+        self.assertEqual(stats["gateway"]["http"]["data"],
+                         {"capacity": 16, "inflight": 0, "rejected_total": 0})
+        self.assertEqual(stats["gateway"]["http"]["stats"],
+                         {"capacity": 1, "inflight": 1, "rejected_total": 0})
         self.assertNotIn("private-key", json.dumps(stats))
         self.assertNotIn("private-value", json.dumps(stats))
         self.assertNotIn(self.directory.name, json.dumps(stats))
@@ -358,6 +416,10 @@ class MiniKVIntegration(unittest.TestCase):
             self.assertEqual(stats["server"]["requests_started_total"], 1)
             first_queue_wait = stats["server"]["request_queue_wait_duration_ns_total"]
             self.assertEqual(stats["gateway"]["rpc"]["pool_in_use"], 1)
+            self.assertEqual(stats["gateway"]["http"]["data"],
+                             {"capacity": 1, "inflight": 1, "rejected_total": 0})
+            self.assertEqual(self.request("GET", "waiting"),
+                             (503, b"Gateway request capacity exhausted\n"))
             with self.rpc_socket() as waiting, self.rpc_socket() as rejected:
                 waiting.sendall(frame(2, b"waiting"))
                 stats = self.wait_stats(
@@ -374,6 +436,8 @@ class MiniKVIntegration(unittest.TestCase):
                 self.assertEqual(stats["server"]["requests_started_total"], 2)
                 self.assertGreaterEqual(stats["server"]["request_queue_wait_duration_ns_total"], first_queue_wait)
                 self.assertEqual(stats["engine"]["durable_sequence"], 0)
+                self.assertEqual(stats["gateway"]["rpc"]["calls_total"], 1)
+                self.assertEqual(stats["gateway"]["http"]["data"]["rejected_total"], 1)
                 self.assertEqual(results, [], "data write completed before Stats sampled its wait")
                 waiting.settimeout(5)
                 self.assertEqual(read_response(waiting), (1, b"durable"))
@@ -1024,6 +1088,16 @@ class MiniKVStartup(unittest.TestCase):
         record = struct.pack("!4sBQII", b"MKL1", 1, 1, 4, 5) + b"keptvalue"
         (directory / "snapshot.v1").write_bytes(header + struct.pack("!I", zlib.crc32(header)))
         (directory / "wal.v1").write_bytes(record + struct.pack("!I", zlib.crc32(record)))
+
+    def test_invalid_http_admission_configuration_fails_before_listening(self):
+        for value in ("0", "-1", "65537", "invalid"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temporary:
+                env = self.environment(Path(temporary) / "data")
+                env.update({"MINIKV_HTTP_MAX_INFLIGHT": value, "MINIKV_HTTP_ADDR": "127.0.0.1:0"})
+                result = subprocess.run([str(GATEWAY)], env=env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("invalid MINIKV_HTTP_MAX_INFLIGHT", result.stderr)
+                self.assertNotIn("listening", result.stdout + result.stderr)
 
     def test_data_capacity_configuration_validation(self):
         invalid = ("", "-1", "+1", " 1", "1 ", "1.0", "18446744073709551616", "invalid")

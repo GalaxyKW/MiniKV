@@ -18,6 +18,7 @@ curl -sS http://127.0.0.1:8080/stats | python3 -m json.tool
 - `server.request_queue_depth` 表示尚未执行的任务，`requests_inflight` 还包含正在执行、等待可靠确认和等待 reactor 消费结果的请求。任一容量耗尽都可能使 `requests_rejected_total` 增长。
 - `engine.wal_capacity_waiters` 表示因 WAL 字节额度不足而阻塞的写请求，仍会占用数据线程；`wal_durable_waiters` 表示等待可靠确认的请求，通过异步完成路径释放数据线程。因此有持久化等待时，`workers_active` 也可能接近 0。
 - `gateway.rpc.pool_in_use` 包含拨号和执行中的数据 RPC；池满时其他请求等待。`pool_wait_duration_ns_total` 的增量可以帮助识别网关等待。
+- `gateway.http.data.inflight` 覆盖上传、RPC 等待及 handler 响应写入；`rejected_total` 增长表示网关在解析前拒绝了新请求。数据 RPC 池仍空闲时，慢上传也可能占满 HTTP 名额。
 - `engine.snapshot_in_progress` 与快照各阶段的耗时增量可以帮助判断尾延迟是否伴随快照发生。它们不是请求延迟直方图。
 
 引擎字段在同一次状态锁持有期间取样；线程池、连接计数和网关分别取样。**整份响应不是跨线程、跨进程的原子快照**，也不提供逐 key 事务视图。计数器可能在连续读取字段期间继续增长。
@@ -136,6 +137,18 @@ Engine 的两类等待只在初始条件不满足时计数，已经持久化的 
 
 `gateway.uptime_seconds` 是 HTTP 网关开始服务以来的单调时钟秒数。`gateway.rpc` 只描述 `/kv` 使用的数据 RPC 池；状态查询另用容量为 1 的池，因此不会污染数据请求计数或占据数据池名额。
 
+新版网关还返回 `gateway.http.data` 和 `gateway.http.stats`，分别描述 `/kv` 与 `/stats` 的 HTTP 接纳名额：
+
+| 字段 | 含义 |
+| --- | --- |
+| `capacity` | HTTP handler 同时接纳数上限；数据默认等于 RPC 池大小，状态固定为 1 |
+| `inflight` | 已接纳且 handler 尚未返回的请求数，包含正在上传、RPC 排队、执行与 handler 内响应写入的请求 |
+| `rejected_total` | 名额满时在参数解析前拒绝的累计请求数，不包含引擎 BUSY 或其他错误 |
+
+这些字段来自本机网关，不接受后端提供的值；计数重启归零。状态查询会占用自己的 HTTP 名额，因此正常 `/stats` 响应中的 `http.stats.inflight` 包含本次查询。名额计数与拒绝计数分别取样，与 RPC 统计也不构成原子快照。旧网关没有 `http` 字段时表示不可用，不能补成实测 0。
+
+HTTP 名额不覆盖连接读头、拒绝路径及 net/http 在 handler 返回后的缓冲和正文收尾，不能用它推算全部 HTTP 连接、goroutine 或进程内存上限。HTTP 名额、数据 RPC 名额和引擎请求名额分别在各层资源释放后归还，取消 HTTP 等待不会撤销引擎操作。
+
 | `gateway.rpc` 字段 | 含义 |
 | --- | --- |
 | `pool_capacity` / `pool_in_use` | 数据 RPC 名额上限 / 正在拨号或执行 RPC 的名额数 |
@@ -148,7 +161,7 @@ Engine 的两类等待只在初始条件不满足时计数，已经持久化的 
 | `exchanges_total` / `exchange_errors_total` | 获得连接后开始收发的尝试次数 / 已结束且返回错误的尝试次数 |
 | `exchange_duration_ns_total` | 已结束的收发尝试耗时，包含取消处理和归还连接，不包含池等待与拨号 |
 
-`calls_total` 在调用开始时增加，错误与耗时在对应尝试结束时更新，不能在并发采样时把它们强行视为同一个完成时刻。GET 内部重试会增加名额申请次数；只有取得连接后才增加收发尝试次数，逻辑调用仍只计一次。HTTP 参数校验失败不会调用 RPC；后端返回 NOT_FOUND、BUSY 或 I/O 状态属于成功收到协议响应，不增加 RPC 传输错误计数。
+`calls_total` 在调用开始时增加，错误与耗时在对应尝试结束时更新，不能在并发采样时把它们强行视为同一个完成时刻。GET 内部重试会增加名额申请次数；只有取得连接后才增加收发尝试次数，逻辑调用仍只计一次。HTTP 接纳拒绝或参数校验失败不会调用 RPC；后端返回 NOT_FOUND、BUSY 或 I/O 状态属于成功收到协议响应，不增加 RPC 传输错误计数。
 
 ## 访问与故障边界
 
@@ -156,12 +169,13 @@ Engine 的两类等待只在初始条件不满足时计数，已经持久化的 
 
 | 情况 | HTTP 状态 | JSON `error` |
 | --- | ---: | --- |
+| 网关状态 HTTP 名额已满 | 503 | `gateway_overloaded` |
 | 后端连接失败、RPC 客户端关闭或 Stats 队列满 | 503 | `backend_unavailable` |
 | 状态 RPC 超时 | 504 | `backend_timeout` |
 | 旧引擎不识别 Stats 操作 | 502 | `stats_unsupported` |
 | 后端返回不合法的状态帧或 JSON | 502 或 503 | `invalid_backend_stats` 或 `backend_unavailable` |
 
-这些失败响应仍包含 `schema_version` 和本机 `gateway` 数据，省略不可得的 `engine` 与 `server`，不返回陈旧缓存。非 GET 方法返回 405，并设置 `Allow: GET`。所有响应禁止缓存。
+这些失败响应仍包含 `schema_version` 和本机 `gateway` 数据，省略不可得的 `engine` 与 `server`，不返回陈旧缓存。取得 HTTP 名额后的非 GET 方法返回 405，并设置 `Allow: GET`；名额已满时优先返回 503。所有响应禁止缓存。
 
 状态通道仍共享引擎连接总上限与状态锁：连接数耗尽时新状态连接可能被拒绝，大数据集快照复制也可能让查询等待状态锁并超时。它没有独立的磁盘健康探针，也不承诺在任意过载下总能访问。单次查询沿用 `MINIKV_RPC_TIMEOUT_MS` 的等待、拨号和收发预算；一个网关最多比数据池上限多持有 1 条状态连接。
 

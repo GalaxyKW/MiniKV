@@ -18,6 +18,14 @@ import (
 	"time"
 )
 
+// Tests of backend decoding supply local metrics independently of HTTP routing.
+// admission_test.go exercises the real gateway admission and stats wiring.
+func statsHandlerForTest(client commandClient, data *rpcClient, started time.Time) http.HandlerFunc {
+	return newStatsHandler(client, func() gatewayStats {
+		return gatewayStats{UptimeSeconds: time.Since(started).Seconds(), RPC: data.stats()}
+	})
+}
+
 const validStatsPayload = `{"schema_version":1,"engine":{
 "wal_mode":"reliable","keys":7,"applied_sequence":12,"durable_sequence":11,
 "wal_pending_bytes":128,"wal_inflight_bytes":64,"wal_queued_records":1,"wal_queue_capacity_bytes":1024,
@@ -68,7 +76,7 @@ func TestStatsHTTPReturnsOnlyDefinedAggregates(t *testing.T) {
 		t.Fatal("expected invalid data request to be counted as a call failure")
 	}
 	response := httptest.NewRecorder()
-	newStatsHandler(client, data, time.Now().Add(-time.Second)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	statsHandlerForTest(client, data, time.Now().Add(-time.Second)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
 	if response.Code != http.StatusOK || client.calls != 1 || client.request != (rpcRequest{op: opStats}) {
 		t.Fatalf("code=%d calls=%d request=%#v", response.Code, client.calls, client.request)
 	}
@@ -129,7 +137,7 @@ func TestStatsHTTPRejectsMissingOrNullBaseMeasurements(t *testing.T) {
 					}
 					client := &fakeClient{response: rpcResponse{status: statusValue, value: string(payload)}}
 					response := httptest.NewRecorder()
-					newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
+					statsHandlerForTest(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
 					var result runtimeStats
 					if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 						t.Fatal(err)
@@ -291,7 +299,7 @@ func TestStatsHTTPOptionalFieldsPreserveMissingZeroAndUint64Values(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			client := &fakeClient{response: rpcResponse{status: statusValue, value: statsPayloadWithOptionalFields(t, test.fields)}}
 			response := httptest.NewRecorder()
-			newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
+			statsHandlerForTest(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
 			if response.Code != http.StatusOK {
 				t.Fatalf("code=%d body=%s", response.Code, response.Body.String())
 			}
@@ -333,7 +341,7 @@ func TestStatsHTTPRejectsInvalidOptionalFieldValues(t *testing.T) {
 					fields := map[string]map[string]json.RawMessage{section: {name: json.RawMessage(invalid)}}
 					client := &fakeClient{response: rpcResponse{status: statusValue, value: statsPayloadWithOptionalFields(t, fields)}}
 					response := httptest.NewRecorder()
-					newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
+					statsHandlerForTest(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
 					var result runtimeStats
 					if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 						t.Fatal(err)
@@ -364,7 +372,7 @@ func TestStatsHTTPRejectsDataAboveCapacity(t *testing.T) {
 			}
 			client := &fakeClient{response: rpcResponse{status: statusValue, value: statsPayloadWithOptionalFields(t, fields)}}
 			response := httptest.NewRecorder()
-			newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
+			statsHandlerForTest(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
 			var result runtimeStats
 			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
@@ -409,7 +417,7 @@ func TestStatsHTTPFailuresPreserveGatewayStats(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			client := &fakeClient{response: test.response, err: test.err}
 			response := httptest.NewRecorder()
-			newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
+			statsHandlerForTest(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
 			var result runtimeStats
 			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
@@ -435,7 +443,7 @@ func TestStatsHTTPRejectsNonGETWithoutBackendCall(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			client := &fakeClient{}
 			response := httptest.NewRecorder()
-			newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(method, "/stats", nil))
+			statsHandlerForTest(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(method, "/stats", nil))
 			if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet || client.calls != 0 {
 				t.Fatalf("code=%d Allow=%q calls=%d", response.Code, response.Header().Get("Allow"), client.calls)
 			}
@@ -504,7 +512,7 @@ func TestStatsUsesIndependentPoolWhileDataRPCIsBlocked(t *testing.T) {
 	response := httptest.NewRecorder()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	newStatsHandler(statsClient, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil).WithContext(ctx))
+	statsHandlerForTest(statsClient, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil).WithContext(ctx))
 	var result runtimeStats
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)

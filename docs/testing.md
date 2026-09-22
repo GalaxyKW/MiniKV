@@ -54,6 +54,7 @@ make docs-test
 | 快照计量 | 捕获持锁计时不包含门控 WAL 同步；快照与后缀写入量和实际文件对账；部分写、同步或安装后失败保留准确计数 | [stats_test.cpp](../tests/stats_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 故障边界 | WAL/快照 I/O 故障注入、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | HTTP 与 RPC | 参数与状态码映射、非法查询串不执行后端操作、合法慢上传的响应预算、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
+| 网关 HTTP 接纳 | 慢上传在解码前占名额、RPC 池前等待者受限；定长/chunked/100-continue 的未发送正文仍能收到拒绝；响应写入、取消、panic 与名额归还；数据和状态路由独立 | [admission_test.go](../go_server/admission_test.go)、[端到端测试](../tests/integration_test.py) |
 | 运行状态 | WAL 队列与写盘批次区分、容量与可靠确认等待、任务排队计时、失败唤醒与重启归零；RPC 等待与重试、基础字段缺失或 null 不补零、旧引擎可选字段的透传语义 | [engine_test.cpp](../tests/engine_test.cpp)、[stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
 | 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理；并发聚合中成功、失败、未命中与网络错误的计数守恒 | [main_test.go](../benmark/main_test.go) |
 | 固定到达率 | 整数时隙边界、过期跳过、并发名额与末尾排空、原请求编号、三类延迟与丢弃守恒 | [arrival_test.go](../benmark/arrival_test.go)、[实验联动测试](../tests/experiment_arrival_test.py) |
@@ -66,6 +67,8 @@ make docs-test
 | 并发历史与恢复 | 对真实 HTTP PUT/GET/DELETE 的完整历史搜索合法串行顺序，同时满足响应值和调用间实时先后关系；把 SIGKILL 后读回的状态纳入同一历史 | [校验器](../tests/history_checker.py)、[校验器测试](../tests/history_checker_test.py)、[端到端测试](../tests/integration_test.py) |
 
 端到端测试还验证：可靠确认释放 worker，但继续占用请求名额；WAL 容量阻塞 worker、数据队列和网关 RPC 名额时，`/stats` 仍可返回；断连后旧请求不会释放名额供重连绕过限制；网络停机宽限结束后，异步回调仍能排空且数据可恢复。非法流水线帧后的未读输入不会截断之前的大 GET 响应，覆盖客户端保持写端开放和半关闭两种情况。引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
+
+HTTP 接纳测试使用真实 RPC 客户端与阻塞的 `net.Pipe` 后端，确认一个 RPC 名额配三个 HTTP 名额时仅有三个调用进入 RPC 层，其余 64 个并发请求在读取正文前拒绝。真实 TCP 测试只发送 POST 请求头，让慢上传占住名额，再检查额外小/大正文请求及时收到完整 503、`/stats` 可查询、拒绝未增加数据 RPC 次数，以及断连后名额回收和正常读写恢复。它验证应用处理请求有上限，不声称测得 RSS 上限或任何网络环境都能收到拒绝响应。
 
 启动检查对每项服务器参数分别验证：配置无效时不创建新数据目录，也不改动既有旧格式文件；导入命令仍忽略服务器专用参数。WAL 兼容测试中的固定文件来自 `6407aa7`，覆盖空日志与检查点后继续写入、删除及 NUL 值，不依赖当前编码器重新生成旧格式样本。
 

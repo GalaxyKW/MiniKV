@@ -161,6 +161,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	httpMaxInflight, err := envInt("MINIKV_HTTP_MAX_INFLIGHT", size, 1, 65536)
+	if err != nil {
+		return err
+	}
 	timeoutMS, err := envInt("MINIKV_RPC_TIMEOUT_MS", 2000, 1, 60000)
 	if err != nil {
 		return err
@@ -171,10 +175,8 @@ func run() error {
 	// data RPC slot is waiting for WAL durability.
 	statsClient := newRPCClient(envString("MINIKV_ENGINE_ADDR", "127.0.0.1:9090"), 1, time.Duration(timeoutMS)*time.Millisecond)
 	defer statsClient.Close()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/kv", newKVHandler(client))
-	mux.HandleFunc("/stats", newStatsHandler(statsClient, client, time.Now()))
-	server := newHTTPServer(envString("MINIKV_HTTP_ADDR", ":8080"), mux, time.Duration(timeoutMS)*time.Millisecond)
+	handler := newGatewayHandler(client, statsClient, time.Now(), httpMaxInflight)
+	server := newHTTPServer(envString("MINIKV_HTTP_ADDR", ":8080"), handler, time.Duration(timeoutMS)*time.Millisecond)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan error, 1)
