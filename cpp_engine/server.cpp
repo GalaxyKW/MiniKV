@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <charconv>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -44,6 +45,18 @@ int env_int(const char* name, int fallback, int minimum, int maximum) {
         throw std::invalid_argument(std::string("invalid ") + name);
     }
     return static_cast<int>(result);
+}
+
+uint64_t env_uint64(const char* name, uint64_t fallback) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr) return fallback;
+    const char* end = raw + std::strlen(raw);
+    uint64_t value = 0;
+    const auto parsed = std::from_chars(raw, end, value);
+    if (parsed.ec != std::errc{} || parsed.ptr != end) {
+        throw std::invalid_argument(std::string("invalid ") + name);
+    }
+    return value;
 }
 
 std::string env_string(const char* name, const char* fallback) {
@@ -609,6 +622,9 @@ private:
             << (engine.wal_mode == WalMode::Reliable ? "reliable" : "throughput") << '"';
         const auto field = [&](const char* name, auto value) { out << ",\"" << name << "\":" << value; };
         field("keys", engine.keys);
+        field("data_bytes", engine.data_bytes);
+        field("data_capacity_bytes", engine.data_capacity_bytes);
+        field("data_rejections_total", engine.data_rejections_total);
         field("applied_sequence", engine.applied_sequence);
         field("durable_sequence", engine.durable_sequence);
         field("wal_pending_bytes", engine.wal_pending_bytes);
@@ -701,6 +717,7 @@ int main(int argc, char** argv) {
             return 2;
         }
         config.data_dir = env_string("MINIKV_DATA_DIR", "./data");
+        config.max_data_bytes = env_uint64("MINIKV_MAX_DATA_BYTES", 0);
         const auto mode = env_string("MINIKV_WAL_MODE", "throughput");
         if (mode != "throughput" && mode != "reliable") throw std::invalid_argument("MINIKV_WAL_MODE must be throughput or reliable");
         config.wal_mode = mode == "reliable" ? WalMode::Reliable : WalMode::Throughput;

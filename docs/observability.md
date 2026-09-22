@@ -13,6 +13,7 @@ curl -sS http://127.0.0.1:8080/stats | python3 -m json.tool
 ## 如何读取一个样本
 
 - `engine.applied_sequence - engine.durable_sequence` 表示内存已应用但尚未确认同步的日志记录数量；包含删除未命中产生的日志。
+- `engine.data_bytes` 接近正的 `data_capacity_bytes` 且 `data_rejections_total` 增加，表示 PUT 达到了数据量上限；即使请求队列空闲，也可能返回 HTTP 503。覆盖较小值或删除数据可释放这项额度。
 - `engine.wal_pending_bytes` 是全部未同步 WAL 字节，**包含正在写盘的批次**。`wal_inflight_bytes` 只表示当前实际提交中的批次，`wal_queued_records` 只计算尚未被取走的记录。
 - `server.request_queue_depth` 表示尚未执行的任务，`requests_inflight` 还包含正在执行、等待可靠确认和等待 reactor 消费结果的请求。任一容量耗尽都可能使 `requests_rejected_total` 增长。
 - `engine.wal_capacity_waiters` 表示因 WAL 字节额度不足而阻塞的写请求，仍会占用数据线程；`wal_durable_waiters` 表示等待可靠确认的请求，通过异步完成路径释放数据线程。因此有持久化等待时，`workers_active` 也可能接近 0。
@@ -31,6 +32,8 @@ curl -sS http://127.0.0.1:8080/stats | python3 -m json.tool
 | --- | --- |
 | `wal_mode` | 实际持久化模式：`throughput` / `reliable` |
 | `keys` | 当前内存数据集中的 key 数量 |
+| `data_bytes` / `data_capacity_bytes` | 当前所有 key/value 的总字节数 / 配置上限，容量 0 表示不限额；不等于进程 RSS |
+| `data_rejections_total` | 本进程因数据字节上限拒绝的 PUT 数量；拒绝不写 WAL、不推进序列 |
 | `applied_sequence` / `durable_sequence` | 已应用到内存 / 已确认持久化的日志序列 |
 | `wal_pending_bytes` | 全部未同步记录的编码字节数，包含队列和写盘中的批次 |
 | `wal_inflight_bytes` | 当前 WAL 提交批次的字节数；该次提交成功或失败后归零 |
@@ -127,7 +130,7 @@ Engine 的两类等待只在初始条件不满足时计数，已经持久化的 
 
 不同请求的等待会重叠，也可能与 WAL 提交、快照计时重叠；不要把这些累计值相加当成总运行时间，也不能从平均值推导 P99。它们用于定位下一步实验，逐请求尾延迟仍由客户端报告等观测提供。
 
-等待、异步容量和新增快照持锁及写入量字段沿用 `schema_version: 1`。新版网关连接不提供这些字段的旧版引擎时，会省略相应字段；缺失表示不可用，不能当作实测 0，实际的 0 会保留。原始 schema 的基础字段必须完整且非 null；缺失或 null 会返回 `502 invalid_backend_stats`，保留本机网关统计，不会把缺失的计数或健康标志补成 0 或 false。计时沿用现有锁，读取时钟与累计计数仍有开销。早期同步服务版本的可靠等待会占据数据线程，比较工作线程利用率时必须同时记录代码版本与执行方式。
+数据容量、等待、异步容量和新增快照持锁及写入量字段沿用 `schema_version: 1`。新版网关连接不提供这些字段的旧版引擎时，会省略相应字段；缺失表示不可用，不能当作实测 0，实际的 0 会保留。数据量和正容量均提供时，网关还会拒绝数据量大于容量的异常状态。原始 schema 的基础字段必须完整且非 null；缺失或 null 会返回 `502 invalid_backend_stats`，保留本机网关统计，不会把缺失的计数或健康标志补成 0 或 false。计时沿用现有锁，读取时钟与累计计数仍有开销。早期同步服务版本的可靠等待会占据数据线程，比较工作线程利用率时必须同时记录代码版本与执行方式。
 
 ## 网关 RPC
 

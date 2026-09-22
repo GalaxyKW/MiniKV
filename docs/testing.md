@@ -11,9 +11,9 @@ make sanitize-test
 
 | 命令 | 实际执行内容 |
 | --- | --- |
-| `make test` | 检查文档，构建 C++ 引擎、Go 网关与压测工具；运行六个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
+| `make test` | 检查文档，构建 C++ 引擎、Go 网关与压测工具；运行七个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
 | `make docs-test` | 检查 README 与 `docs/` 中的本地内联链接、标题锚点和 shell 示例语法，并验证检查器本身；只需 Python 3.8+ 与 Bash，不构建或启动服务 |
-| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及六个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
+| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及七个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
 | `make experiment-test` | 使用 Python 标准库验证元数据采样、隔离实验、报告汇总、快照离线分析与子进程清理；不需要提前构建服务 |
@@ -45,6 +45,7 @@ make docs-test
 | 存储与恢复 | 二进制值、并发写入、group commit、目录独占、旧数据导入、并发关闭、WAL 尾部修复、校验和错误与文件缺失 | [engine_test.cpp](../tests/engine_test.cpp) |
 | WAL 格式与升级 | 文件头与两条记录头逐位损坏、每个真实尾部截断位置、旧版含糊尾部保持原样、固定旧版本文件兼容、检查点升级及安装边界异常/退出后恢复 | [wal_format_test.cpp](../tests/wal_format_test.cpp) |
 | 文件系统边界 | 重定向目录链接、重命名并复用路径时两个数据库互不串写；文件类型及硬链接检查、临时文件别名与写失败后恢复、只读硬链接保留、旧数据跨读取缓冲区及行尾校验 | [filesystem_test.cpp](../tests/filesystem_test.cpp) |
+| 数据容量 | key/value 字节精确计量、覆盖和删除释放、无副作用拒绝、异步即时响应、并发额度竞争、WAL 等待后重查、恢复最终状态及超限拒绝不改文件 | [data_limit_test.cpp](../tests/data_limit_test.cpp) |
 | WAL 并发 | 暂停 WAL 同步时吞吐模式请求仍可执行；未同步批次仍占用队列额度；可靠模式按批次确认；关闭时排空正在同步和待写的批次 | [engine_test.cpp](../tests/engine_test.cpp) |
 | 异步确认 | 分批目标、GET 捕获值、删除未命中、名额拒绝无副作用、回调恰好一次、异常隔离、重入保护与关闭排空 | [async_test.cpp](../tests/async_test.cpp) |
 | 快照并发 | 快照文件写盘期间可靠读写继续完成；快照捕获固定版本；自动快照、多个快照串行执行、关闭等待快照、WAL 替换保留后续写入 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
@@ -87,11 +88,11 @@ ThreadSanitizer 使用独立构建目录，与 ASan/UBSan 检查分开运行：
 cmake -S cpp_engine -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
   '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
   -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
-cmake --build build-tsan --target engine_test snapshot_test stats_test async_test wal_format_test filesystem_test -j2
+cmake --build build-tsan --target engine_test snapshot_test stats_test async_test wal_format_test filesystem_test data_limit_test -j2
 (cd build-tsan && TSAN_OPTIONS=halt_on_error=1 ctest --output-on-failure)
 ```
 
-该命令覆盖存储、快照、运行状态、异步确认、WAL 格式和文件系统边界六个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
+该命令覆盖存储、快照、运行状态、异步确认、WAL 格式、文件系统边界和数据容量七个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
 
 如果 TSan 在测试启动前报告 `unexpected memory mapping`，在支持 `setarch` 的 x86_64 Linux 环境中，可以仅对本次测试进程及其子进程关闭地址随机化后重试：
 

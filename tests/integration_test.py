@@ -67,6 +67,7 @@ class MiniKVIntegration(unittest.TestCase):
         self.addCleanup(self.cleanup_processes)
         self.engine_env = dict(os.environ, **{
             "MINIKV_DATA_DIR": str(Path(self.directory.name) / "data"),
+            "MINIKV_MAX_DATA_BYTES": "0",
             "MINIKV_ENGINE_HOST": "127.0.0.1",
             "MINIKV_ENGINE_PORT": str(self.engine_port),
             "MINIKV_WAL_MODE": "reliable",
@@ -189,6 +190,9 @@ class MiniKVIntegration(unittest.TestCase):
                                s["engine"]["async_requests_inflight"] == 0, "completed requests did not release capacity")
         self.assertEqual(stats["schema_version"], 1)
         self.assertEqual(stats["engine"]["keys"], 1)
+        self.assertEqual(stats["engine"]["data_bytes"], len(b"private-keyprivate-value"))
+        self.assertEqual(stats["engine"]["data_capacity_bytes"], 0)
+        self.assertEqual(stats["engine"]["data_rejections_total"], 0)
         self.assertEqual(stats["engine"]["wal_mode"], "reliable")
         self.assertEqual(stats["engine"]["applied_sequence"], 1)
         self.assertEqual(stats["engine"]["durable_sequence"], 1)
@@ -264,6 +268,57 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(recovered["server"]["requests_started_total"], 0)
         self.assertEqual(recovered["server"]["request_queue_wait_duration_ns_total"], 0)
         self.assertEqual(recovered["gateway"]["rpc"]["calls_total"], 2)
+
+    def test_data_capacity_rejects_writes_and_recovers_released_space(self):
+        for mode in ("throughput", "reliable"):
+            with self.subTest(mode=mode):
+                self.stop("gateway")
+                self.stop("engine")
+                self.engine_env.update({"MINIKV_WAL_MODE": mode, "MINIKV_MAX_DATA_BYTES": "12",
+                                        "MINIKV_DATA_DIR": str(Path(self.directory.name) / ("data-" + mode)),
+                                        "MINIKV_SNAPSHOT_INTERVAL_MS": "0"})
+                self.start_engine()
+                self.start_gateway()
+                self.assertEqual(self.request("POST", "a", "12345"), (200, b"OK\n"))
+                self.assertEqual(self.request("POST", "b", "12345"), (200, b"OK\n"))
+                self.wait_stats(lambda s: s["engine"]["durable_sequence"] == 2, "initial writes not durable")
+                self.assertEqual(self.request("POST", "c", "")[0], 503)
+                self.assertEqual(self.request("POST", "a", "123456")[0], 503)
+                _, rejected = self.runtime_stats()
+                state = rejected["engine"]
+                self.assertEqual((state["keys"], state["data_bytes"], state["data_capacity_bytes"]), (2, 12, 12))
+                self.assertEqual((state["applied_sequence"], state["durable_sequence"]), (2, 2))
+                self.assertEqual(state["data_rejections_total"], 2)
+                self.assertEqual(state["wal_pending_bytes"], 0)
+                self.assertFalse(state["io_failed"])
+                self.assertEqual(self.request("GET", "a"), (200, b"VALUE 12345\n"))
+                self.assertEqual(self.request("GET", "c"), (404, b"NOT_FOUND\n"))
+                self.assertEqual(self.request("POST", "a", ""), (200, b"OK\n"))
+                # UTF-8 key and value are six bytes together, not two characters.
+                self.assertEqual(self.request("POST", "中", "汉")[0], 503)
+                self.assertEqual(self.request("POST", "b", ""), (200, b"OK\n"))
+                self.assertEqual(self.request("POST", "中", "汉"), (200, b"OK\n"))
+                self.assertEqual(self.request("POST", "n\0", "\0z"), (200, b"OK\n"))
+                self.assertEqual(self.request("DELETE", "中"), (200, b"OK\n"))
+                self.assertEqual(self.request("POST", "c", "12345"), (200, b"OK\n"))
+                _, completed = self.runtime_stats()
+                self.assertEqual(completed["engine"]["data_bytes"], 12)
+                self.assertEqual(completed["engine"]["data_rejections_total"], 3)
+                self.assertEqual(completed["engine"]["applied_sequence"], 8)
+                self.wait_stats(lambda s: s["engine"]["async_requests_inflight"] == 0,
+                                "capacity rejection leaked an async slot")
+                self.stop("gateway")
+                self.stop("engine")
+                self.start_engine()
+                self.start_gateway()
+                _, recovered = self.runtime_stats()
+                self.assertEqual((recovered["engine"]["data_bytes"], recovered["engine"]["data_capacity_bytes"]),
+                                 (12, 12))
+                self.assertEqual(recovered["engine"]["data_rejections_total"], 0)
+                self.assertEqual(recovered["engine"]["durable_sequence"], 8)
+                for key, value in (("a", b""), ("b", b""), ("n\0", b"\0z"), ("c", b"12345")):
+                    self.assertEqual(self.request("GET", key), (200, b"VALUE " + value + b"\n"))
+                self.assertEqual(self.request("GET", "中"), (404, b"NOT_FOUND\n"))
 
     def test_durable_confirmation_releases_worker_but_keeps_request_capacity(self):
         self.stop("gateway")
@@ -856,6 +911,32 @@ class MiniKVStartup(unittest.TestCase):
         record = struct.pack("!4sBQII", b"MKL1", 1, 1, 4, 5) + b"keptvalue"
         (directory / "snapshot.v1").write_bytes(header + struct.pack("!I", zlib.crc32(header)))
         (directory / "wal.v1").write_bytes(record + struct.pack("!I", zlib.crc32(record)))
+
+    def test_data_capacity_configuration_validation(self):
+        invalid = ("", "-1", "+1", " 1", "1 ", "1.0", "18446744073709551616", "invalid")
+        for value in invalid:
+            for legacy in (False, True):
+                with self.subTest(value=value, legacy=legacy), tempfile.TemporaryDirectory() as temporary:
+                    directory = Path(temporary) / "data"
+                    if legacy:
+                        self.legacy_binary_files(directory)
+                    before = {path.name: path.read_bytes() for path in directory.glob("*")}
+                    env = self.environment(directory)
+                    env["MINIKV_MAX_DATA_BYTES"] = value
+                    for args in ([], ["--import-legacy"]):
+                        result = subprocess.run([str(ENGINE)] + args, env=env,
+                                                capture_output=True, text=True, timeout=5)
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn("MINIKV_MAX_DATA_BYTES", result.stderr)
+                        self.assertEqual(directory.exists(), legacy)
+                        self.assertEqual({path.name: path.read_bytes() for path in directory.glob("*")}, before)
+        for value in ("0", "1", "18446744073709551615"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temporary:
+                env = self.environment(Path(temporary) / "data")
+                env["MINIKV_MAX_DATA_BYTES"] = value
+                result = subprocess.run([str(ENGINE), "--import-legacy"], env=env,
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_invalid_server_configuration_does_not_open_storage(self):
         invalid = {

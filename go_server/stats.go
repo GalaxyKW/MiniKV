@@ -72,7 +72,10 @@ type engineStats struct {
 	WalCommitDurationNS     uint64 `json:"wal_commit_duration_ns_total"`
 	WalCommitLastDurationNS uint64 `json:"wal_commit_last_duration_ns"`
 	// Optional counters distinguish unavailable fields from a measured zero
-	// across engine versions that add wait, asynchronous request and snapshot metrics.
+	// across engine versions that add data limits, waits, asynchronous requests and snapshots.
+	DataBytes                                 *uint64 `json:"data_bytes,omitempty"`
+	DataCapacityBytes                         *uint64 `json:"data_capacity_bytes,omitempty"`
+	DataRejectionsTotal                       *uint64 `json:"data_rejections_total,omitempty"`
 	WalCapacityWaiters                        *uint64 `json:"wal_capacity_waiters,omitempty"`
 	WalCapacityWaitsTotal                     *uint64 `json:"wal_capacity_waits_total,omitempty"`
 	WalCapacityWaitDurationNS                 *uint64 `json:"wal_capacity_wait_duration_ns_total,omitempty"`
@@ -170,6 +173,10 @@ func decodeStats(payload string) (runtimeStats, error) {
 		}
 	}
 	engine, server := result.Engine, result.Server
+	if engine.DataBytes != nil && engine.DataCapacityBytes != nil &&
+		*engine.DataCapacityBytes != 0 && *engine.DataBytes > *engine.DataCapacityBytes {
+		return runtimeStats{}, errors.New("invalid stats state")
+	}
 	if (engine.WalMode != "throughput" && engine.WalMode != "reliable") ||
 		engine.DurableSequence > engine.AppliedSequence || engine.WalInflightBytes > engine.WalPendingBytes ||
 		engine.WalQueueCapacityBytes == 0 || server.WorkersCapacity == 0 || server.RequestQueueCapacity == 0 ||

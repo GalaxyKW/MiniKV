@@ -146,6 +146,7 @@ func TestStatsHTTPRejectsMissingOrNullBaseMeasurements(t *testing.T) {
 
 var optionalStatsFields = map[string][]string{
 	"engine": {
+		"data_bytes", "data_capacity_bytes", "data_rejections_total",
 		"wal_capacity_waiters", "wal_capacity_waits_total", "wal_capacity_wait_duration_ns_total",
 		"wal_durable_waiters", "wal_durable_waits_total", "wal_durable_wait_duration_ns_total",
 		"async_requests_inflight", "async_requests_capacity", "async_callback_failures_total",
@@ -193,6 +194,22 @@ func TestStatsHTTPOptionalFieldsPreserveMissingZeroAndUint64Values(t *testing.T)
 		fields map[string]map[string]json.RawMessage
 	}{
 		{name: "older_engine_without_wait_fields"},
+		{name: "data_within_capacity", fields: map[string]map[string]json.RawMessage{
+			"engine": {"data_bytes": json.RawMessage(`13`), "data_capacity_bytes": json.RawMessage(`64`),
+				"data_rejections_total": json.RawMessage(`7`)},
+		}},
+		{name: "data_at_capacity", fields: map[string]map[string]json.RawMessage{
+			"engine": {"data_bytes": json.RawMessage(`64`), "data_capacity_bytes": json.RawMessage(`64`)},
+		}},
+		{name: "data_unlimited", fields: map[string]map[string]json.RawMessage{
+			"engine": {"data_bytes": json.RawMessage(`18446744073709551615`), "data_capacity_bytes": json.RawMessage(`0`)},
+		}},
+		{name: "data_without_capacity", fields: map[string]map[string]json.RawMessage{
+			"engine": {"data_bytes": json.RawMessage(`18446744073709551615`)},
+		}},
+		{name: "capacity_without_data", fields: map[string]map[string]json.RawMessage{
+			"engine": {"data_capacity_bytes": json.RawMessage(`1`)},
+		}},
 		{name: "partial_engine_fields", fields: map[string]map[string]json.RawMessage{
 			"engine": {"wal_capacity_waiters": json.RawMessage(`0`), "wal_capacity_waits_total": json.RawMessage(`7`)},
 		}},
@@ -331,6 +348,32 @@ func TestStatsHTTPRejectsInvalidOptionalFieldValues(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestStatsHTTPRejectsDataAboveCapacity(t *testing.T) {
+	data := newRPCClient("unused", 1, time.Second)
+	defer data.Close()
+	for _, test := range []struct{ used, capacity string }{
+		{`65`, `64`},
+		{`18446744073709551615`, `18446744073709551614`},
+	} {
+		t.Run(test.used+"/"+test.capacity, func(t *testing.T) {
+			fields := map[string]map[string]json.RawMessage{
+				"engine": {"data_bytes": json.RawMessage(test.used), "data_capacity_bytes": json.RawMessage(test.capacity)},
+			}
+			client := &fakeClient{response: rpcResponse{status: statusValue, value: statsPayloadWithOptionalFields(t, fields)}}
+			response := httptest.NewRecorder()
+			newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
+			var result runtimeStats
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != http.StatusBadGateway || result.Error != "invalid_backend_stats" ||
+				result.SchemaVersion != 1 || result.Engine != nil || result.Server != nil || result.Gateway == nil {
+				t.Fatalf("data above capacity was accepted or lost gateway stats: code=%d result=%#v", response.Code, result)
+			}
+		})
 	}
 }
 

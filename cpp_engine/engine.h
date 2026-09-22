@@ -40,6 +40,8 @@ struct EngineConfig {
     size_t wal_batch_size = 512;
     size_t wal_queue_bytes = 16 * 1024 * 1024;
     size_t max_async_requests = 148;
+    // Live key/value bytes only; zero leaves the logical dataset unlimited.
+    uint64_t max_data_bytes = 0;
     std::chrono::milliseconds wal_flush_interval{100};
     std::chrono::milliseconds snapshot_interval{20 * 60 * 1000};
     // Tests can fail or terminate at an actual I/O boundary. Must be thread-safe:
@@ -53,6 +55,9 @@ struct EngineConfig {
 struct EngineStats {
     WalMode wal_mode = WalMode::Throughput;
     uint64_t keys = 0;
+    uint64_t data_bytes = 0;
+    uint64_t data_capacity_bytes = 0;
+    uint64_t data_rejections_total = 0;
     uint64_t applied_sequence = 0;
     uint64_t durable_sequence = 0;
     uint64_t wal_pending_bytes = 0;
@@ -146,6 +151,8 @@ private:
     };
 
     AppliedRequest apply_locked(const Request& request, std::unique_lock<std::mutex>& lock);
+    bool data_size_after(const Request& request, uint64_t& bytes) const;
+    void validate_recovered_data();
     void recover();
     void load_snapshot();
     bool load_wal(); // true when an existing legacy WAL needs a checkpoint upgrade
@@ -176,6 +183,7 @@ private:
     std::condition_variable snapshot_wake_;
     std::condition_variable committed_;
     std::unordered_map<std::string, std::string> kv_;
+    uint64_t data_bytes_ = 0;
     std::deque<PendingRecord> pending_;
     // Registration shares the state lock with apply and durable publication;
     // targets are nondecreasing. Splicing a reserved node cannot allocate.

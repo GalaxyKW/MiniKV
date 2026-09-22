@@ -343,6 +343,7 @@ void Engine::recover() {
         throw std::runtime_error("legacy data detected; stop the old engine, back up the directory, then run engine --import-legacy");
     }
     if (legacy) import_legacy();
+    validate_recovered_data();
     wal_fd_ = open_regular_at(directory_fd_, "wal.v1", O_RDWR | O_CREAT | O_EXCL | O_APPEND, true);
     write_all(wal_fd_, codec::wal_file_header());
     sync_file(wal_fd_);
@@ -431,6 +432,9 @@ bool Engine::load_wal() {
         }
         valid_bytes += static_cast<off_t>(size);
     }
+    // The final replayed image, not a historical snapshot or intermediate WAL
+    // state, must fit before recovery can repair or replace any original file.
+    validate_recovered_data();
     // Legacy recovery is read-only until the ordinary checkpoint upgrade. All
     // repairable v2 truncation boundaries preserve the verified file header.
     if (!legacy && applied_sequence_ == checkpoint_sequence && (valid_bytes != data_start || incomplete_tail)) {
@@ -477,6 +481,35 @@ void Engine::fail_locked(const std::string& message) {
     committed_.notify_all();
 }
 
+void Engine::validate_recovered_data() {
+    uint64_t bytes = 0;
+    for (const auto& entry : kv_) {
+        const uint64_t size = static_cast<uint64_t>(entry.first.size()) + entry.second.size();
+        if (size > std::numeric_limits<uint64_t>::max() - bytes) {
+            throw std::runtime_error("recovered data byte count overflows");
+        }
+        bytes += size;
+        if (config_.max_data_bytes && bytes > config_.max_data_bytes) {
+            throw std::runtime_error("recovered data exceeds configured data byte capacity");
+        }
+    }
+    data_bytes_ = bytes;
+}
+
+// Called only for a validated mutation while the state lock is held. Recompute
+// after any wait: another writer may replace or delete this key in the meantime.
+bool Engine::data_size_after(const Request& request, uint64_t& bytes) const {
+    const auto found = kv_.find(request.key);
+    const uint64_t previous = found == kv_.end() ? 0
+        : static_cast<uint64_t>(found->first.size()) + found->second.size();
+    const uint64_t next = request.operation == Operation::Put
+        ? static_cast<uint64_t>(request.key.size()) + request.value.size() : 0;
+    bytes = data_bytes_ - previous;
+    if (next > std::numeric_limits<uint64_t>::max() - bytes) return false;
+    bytes += next;
+    return config_.max_data_bytes == 0 || bytes <= config_.max_data_bytes;
+}
+
 Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_lock<std::mutex>& lock) {
     if (!failure_.empty()) return {{Status::IOError, failure_}};
     if (stopping_) return {{Status::Busy, "engine is stopping"}};
@@ -485,13 +518,23 @@ Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_
         Response result = it == kv_.end() ? Response{Status::NotFound, {}} : Response{Status::Value, it->second};
         return {std::move(result), applied_sequence_, config_.wal_mode == WalMode::Reliable};
     }
+    uint64_t next_data_bytes;
+    if (!data_size_after(request, next_data_bytes)) {
+        ++stats_.data_rejections_total;
+        return {{Status::Busy, "data byte capacity reached"}};
+    }
     const size_t size = codec::kWalRecordHeader + request.key.size() + request.value.size() + 4;
+    const bool capacity_wait = pending_bytes_ + size > config_.wal_queue_bytes;
     wait_with_stats(committed_, lock,
                     [&] { return stopping_ || !failure_.empty() || pending_bytes_ + size <= config_.wal_queue_bytes; },
                     stats_.wal_capacity_waiters, stats_.wal_capacity_waits_total,
                     stats_.wal_capacity_wait_duration_ns_total);
     if (!failure_.empty()) return {{Status::IOError, failure_}};
     if (stopping_) return {{Status::Busy, "engine is stopping"}};
+    if (capacity_wait && !data_size_after(request, next_data_bytes)) {
+        ++stats_.data_rejections_total;
+        return {{Status::Busy, "data byte capacity reached"}};
+    }
     if (applied_sequence_ == std::numeric_limits<uint64_t>::max()) return {{Status::IOError, "sequence exhausted"}};
     const uint64_t sequence = applied_sequence_ + 1;
     Status status = Status::Ok;
@@ -499,8 +542,9 @@ Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_
         // This mutex defines one order for the WAL, memory, and snapshot boundary.
         pending_.push_back({sequence, codec::wal_record(sequence, request.operation, request.key, request.value)});
         pending_bytes_ += size;
-        if (request.operation == Operation::Put) kv_[request.key] = request.value;
+        if (request.operation == Operation::Put) kv_.insert_or_assign(request.key, request.value);
         else if (kv_.erase(request.key) == 0) status = Status::NotFound;
+        data_bytes_ = next_data_bytes;
         applied_sequence_ = sequence;
     } catch (const std::exception& error) {
         fail_locked(error.what());
@@ -536,6 +580,11 @@ std::optional<Response> Engine::execute_async(const Request& request, AsyncCompl
     std::unique_lock<std::mutex> lock(mutex_);
     if (!failure_.empty()) return Response{Status::IOError, failure_};
     if (stopping_) return Response{Status::Busy, "engine is stopping"};
+    uint64_t next_data_bytes;
+    if (config_.max_data_bytes && request.operation == Operation::Put && !data_size_after(request, next_data_bytes)) {
+        ++stats_.data_rejections_total;
+        return Response{Status::Busy, "data byte capacity reached"};
+    }
 
     const bool may_defer = config_.wal_mode == WalMode::Reliable &&
         (request.operation != Operation::Get || durable_sequence_ < applied_sequence_);
@@ -896,6 +945,8 @@ EngineStats Engine::stats() const {
     auto result = stats_;
     result.wal_mode = config_.wal_mode;
     result.keys = kv_.size();
+    result.data_bytes = data_bytes_;
+    result.data_capacity_bytes = config_.max_data_bytes;
     result.applied_sequence = applied_sequence_;
     result.durable_sequence = durable_sequence_;
     result.wal_pending_bytes = pending_bytes_;
