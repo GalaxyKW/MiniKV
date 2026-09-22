@@ -144,6 +144,7 @@ python3 benmark/summarize.py /tmp/minikv-arrival-experiment
 | `index.json` | 矩阵进度、每次结果及成功/失败次数；固定速率另列互斥的 degraded 次数 |
 | `binaries/` | 本次实验实际运行的三个执行文件副本，SHA-256 与初始记录一致 |
 | 每次实验的 `commands.json` | 实际命令、工作目录和明确传给子进程的环境 |
+| `process_guard.py` 与 manifest 的 `process_guard` | 本次实验冻结的启动助手及 SHA-256；`commands.launcher` 记录解释器、前缀参数和父 PID，角色 `argv` 保留 exec 后的目标命令 |
 | `result.json` | `ok` / `degraded` / `failed` / `interrupted` 状态、错误、进程退出情况和观察摘要 |
 | `report.json` | 压测工具原始 JSON：实际操作数、结果分类、延迟与吞吐量 |
 | `stats-before/after/settled.json` | 预置前、压测进程结束后、未同步 WAL 排空后的运行状态 |
@@ -272,6 +273,10 @@ CPU 时间需要除以元数据中的 `cpu.clock_ticks_per_second`；采样间�
 ## 失败、中断与现场保留
 
 每个子进程使用单独的会话。程序通过自己创建的进程句柄，按 **压测 → 网关 → 引擎** 的顺序关闭；超过配置的关闭等待时间才强制结束，并把强制关闭或非预期退出写入该轮错误。仅经过完整报告校验的固定速率损失允许压测进程退出 1，其他进程仍须正常退出 0。它不会按执行文件名称查找或终止其他进程。
+
+Linux 启动助手会先安装 `PR_SET_PDEATHSIG(SIGKILL)`，再确认父 PID 仍为 runner 在创建进程前传入的值，最后直接 exec 目标程序。父进程在安装前已退出时不会继续启动目标；安装后突然退出时，内核会终止对应的直接子进程，包括忽略 SIGTERM 的程序。安装失败也会使启动失败。正常 SIGINT/SIGTERM、关闭顺序、超时升级和退出码校验仍由 runner 处理；强制退出兜底不等待 WAL 排空，也不会补写正常收尾证据。
+
+助手在目标程序启动前被替换，PID 和采样对象保持不变，没有长期运行的额外监督进程。当前 runner 在主线程创建三类直接子进程；这个保证不扩展到目标自行 fork 的后代或改变凭据的程序。语义与限制见 [Linux man-pages](https://www.man7.org/linux/man-pages/man2/PR_SET_PDEATHSIG.2const.html)。每次实验保存独立的助手副本，后续源码修改不会改变该实验后续轮次的启动代码。离线汇总核对记录的启动前缀及现有助手副本哈希；省略副本时会明确提示仅有记录哈希，旧归档缺少该字段时仍可复查，不能因此推断旧实验具有父进程退出保护。
 
 某一轮启动失败、运行超时、闭环请求失败、报告不合法或正常关闭失败时，该轮记为 `failed`；固定到达率的完整损失报告记为 `degraded`，保留现场后继续后续矩阵。收到 SIGINT/SIGTERM 时，当前轮记为 `interrupted`，完成清理并停止后续矩阵。全部成功时程序退出码为 0，存在 degraded、失败或中断时为 1；参数错误、执行文件不可用或输出目录已存在时，参数解析以 2 退出。
 

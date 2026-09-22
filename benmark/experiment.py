@@ -574,6 +574,8 @@ def run_case(args, name, mode, interval):
         engine_env, gateway_env, expected, command, engine_port, http_port = configuration(args, directory, mode, interval)
         base_env = runtime_environment(args)
         commands = {"cwd": str(ROOT), "runtime_environment": base_env,
+                    "launcher": {"parent_pid": os.getpid(), "argv_prefix": [sys.executable, "-I", "-S",
+                                 str(args.process_guard_path), str(os.getpid())]},
                     "engine": {"argv": [str(args.engine)], "environment": engine_env},
                     "gateway": {"argv": [str(args.gateway)], "environment": gateway_env},
                     "bench": {"argv": command, "environment": {}}}
@@ -594,7 +596,11 @@ def run_case(args, name, mode, interval):
             # inherit unblocked SIGTERM so their graceful shutdown still works.
             INTERRUPT_STATE["launching"] = True
             try:
-                process = subprocess.Popen(argv, cwd=ROOT, env=dict(base_env, **environment),
+                # The helper arms Linux parent-death SIGKILL, then replaces
+                # itself with the target. Samples and wait() still refer to the
+                # actual program; no supervisor runs beside the measurement.
+                process = subprocess.Popen(commands["launcher"]["argv_prefix"] + argv,
+                                           cwd=ROOT, env=dict(base_env, **environment),
                                            stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
                 processes[role] = process
             finally:
@@ -758,6 +764,17 @@ def main(argv=None):
                     "metadata": collect_metadata(ROOT, {name: getattr(args, name) for name in ("engine", "gateway", "bench")})}
         write_json(args.output / "manifest.json", manifest)
         write_json(args.output / "index.json", index)
+        # Preserve the exact launch helper with this experiment, just as we do
+        # for its programs. A later source edit must not alter later launches.
+        guard_source = (ROOT / "benmark/process_guard.py").read_bytes()
+        args.process_guard_path = args.output / "process_guard.py"
+        args.process_guard_path.write_bytes(guard_source)
+        args.process_guard_path.chmod(0o444)
+        guard_digest = hashlib.sha256(guard_source).hexdigest()
+        if hashlib.sha256(args.process_guard_path.read_bytes()).hexdigest() != guard_digest:
+            raise ExperimentError("child guard changed while copying; start a new experiment")
+        manifest["process_guard"] = {"protocol": "linux-pdeathsig-v1", "path": str(args.process_guard_path),
+                                     "sha256": guard_digest, "python": sys.executable, "signal": "SIGKILL"}
         # Keep the selected executables with the artifacts. A concurrent `make`
         # can replace the original paths without changing later repetitions.
         executable_directory = args.output / "binaries"

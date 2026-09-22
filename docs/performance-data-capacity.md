@@ -79,10 +79,14 @@ CPU 核数按每个角色自身采样窗口的 `(Δuser_ticks + Δsystem_ticks) 
 (cd benmark/baselines/2026-09-22-data-capacity && sha256sum -c SHA256SUMS)
 capacity_extract="$(mktemp -d)"
 tar -xzf benmark/baselines/2026-09-22-data-capacity/data-capacity.tar.gz -C "$capacity_extract"
+capacity_collector="$capacity_extract/collector"
+mkdir "$capacity_collector"
+git archive 385bb6c benmark/experiment.py benmark/experiment_support.py \
+  benmark/summarize.py benmark/snapshot_report.py | tar -x -C "$capacity_collector"
 python3 benmark/baselines/2026-09-22-data-capacity/audit_capacity.py \
-  "$capacity_extract/data-capacity" --repository "$PWD"
+  "$capacity_extract/data-capacity" --repository "$capacity_collector"
 ```
 
-本归档的审计命令预期退出 **1**，输出 33 valid、1 incomplete、14 missing、8 inconclusive，并在解压目录生成 `analysis.json` 和 `analysis.csv`；不会启动服务。当前采集模块须与计划记录的四个文件哈希一致，否则应检出 `385bb6c` 用作 `--repository`。
+本归档的审计命令预期退出 **1**，输出 33 valid、1 incomplete、14 missing、8 inconclusive，并在解压目录生成 `analysis.json` 和 `analysis.csv`；不会启动服务。命令从 `385bb6c` 提取冻结的四个采集模块，避免后续代码变更影响历史复查；本地仓库须保有该提交。
 
 [实际压缩包搬移检查](../benmark/baselines/2026-09-22-data-capacity/RELOCATION_CHECK.json) 验证了全部 514 个成员，并确认逐轮、配对、判断及数量与原目录一致；[独立隔离检查](../benmark/baselines/2026-09-22-data-capacity/ISOLATED_RELOCATION_CHECK.json) 还禁止打开原始实验目录，结果同样一致。重新构建两个引擎、共用 Go 程序并生成新路径计划的步骤见 [REPRODUCE.md](../benmark/baselines/2026-09-22-data-capacity/REPRODUCE.md)。新实验使用新目录与新哈希，不恢复或改写本次中断的计划。

@@ -268,6 +268,105 @@ else:
 '''
 
 
+# A separate process owns subreaper state so the test runner never adopts or
+# signals unrelated children. It reaps orphans itself instead of depending on
+# the host's PID 1 to remove zombies after the experiment runner is killed.
+RUNNER_DEATH_DRIVER = r'''
+import ctypes
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+fixtures, command = Path(sys.argv[1]), json.loads(sys.argv[2])
+libc = ctypes.CDLL(None, use_errno=True)
+prctl = libc.prctl
+prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+prctl.restype = ctypes.c_int
+if prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+    raise OSError(ctypes.get_errno(), "cannot become a test subreaper")
+
+def interrupted(signum, frame):
+    raise RuntimeError("test driver interrupted")
+
+signal.signal(signal.SIGTERM, interrupted)
+runner = None
+
+def children():
+    return [int(pid) for pid in Path('/proc/self/task', str(os.getpid()), 'children').read_text().split()]
+
+def cleanup():
+    # All direct children here belong to this private driver. A child which
+    # exits after waitpid(WNOHANG) remains unreaped, so its PID cannot be reused
+    # before kill(). Never signal a child already reaped by an earlier wait.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if runner is not None and runner.poll() is None:
+        runner.kill()
+        runner.wait(timeout=3)
+    deadline = time.monotonic() + 3
+    while children():
+        for pid in children():
+            try:
+                reaped, _ = os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                continue
+            if not reaped:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError("test driver could not reap its own children")
+        time.sleep(.01)
+
+try:
+    with (fixtures / 'hard-kill-runner.log').open('w') as log:
+        runner = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        deadline = time.monotonic() + 8
+        records = {}
+        while True:
+            for path in (fixtures / 'pids').glob('*.json'):
+                if path.name.endswith('.args.json'):
+                    continue
+                try:
+                    record = json.loads(path.read_text())
+                except json.JSONDecodeError:
+                    continue  # The fixture may still be writing its marker.
+                records[record['role']] = record
+            # The benchmark marker is written after its SIGTERM disposition
+            # is installed; listening engine/gateway have already done so too.
+            if set(records) == {'engine', 'gateway', 'bench'} and any(fixtures.glob('benchmark-started-*')):
+                break
+            if runner.poll() is not None or time.monotonic() >= deadline:
+                raise RuntimeError('runner did not reach three ready children')
+            time.sleep(.01)
+        runner.kill()  # Only the runner PID, never its session or descendants.
+        assert runner.wait(timeout=3) == -signal.SIGKILL
+        pending = {record['pid']: role for role, record in records.items()}
+        outcomes = {}
+        deadline = time.monotonic() + 3
+        while pending:
+            for pid, role in list(pending.items()):
+                reaped, status = os.waitpid(pid, os.WNOHANG)
+                if reaped:
+                    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGKILL, (role, status)
+                    outcomes[role] = {'pid': pid, 'signal': os.WTERMSIG(status)}
+                    del pending[pid]
+            if pending and time.monotonic() >= deadline:
+                raise RuntimeError('children survived runner SIGKILL: ' + repr(pending))
+            if pending:
+                time.sleep(.01)
+        # Assert before fallback cleanup so cleanup cannot conceal a leak.
+        assert not children(), 'unexpected helper/child process remained'
+        print(json.dumps(outcomes), flush=True)
+finally:
+    cleanup()
+'''
+
+
 class ExperimentRunnerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="minikv-experiment-test-")
@@ -313,15 +412,18 @@ class ExperimentRunnerTests(unittest.TestCase):
             self.assertFalse(Path("/proc", str(record["pid"])).exists(), "runner left a child process behind: %r" % record)
         return records
 
-    def invoke(self, control=None, extra=(), expected=None, interrupt_signal=None, cleanup_signal=None):
-        if control is not None:
-            self.control.write_text(json.dumps(control))
-        args = [sys.executable, str(RUNNER), "--output", str(self.output),
+    def runner_command(self, extra=()):
+        return [sys.executable, str(RUNNER), "--output", str(self.output),
                 "--engine", str(self.fixtures / "engine"), "--gateway", str(self.fixtures / "gateway"),
                 "--bench", str(self.fixtures / "bench"), "--requests", "9", "--workers", "2", "--keyspace", "3",
                 "--repeats", "1", "--modes", "throughput", "--snapshot-ms", "50", "--run-timeout", "2",
                 "--startup-timeout", "1", "--shutdown-timeout", "1", "--sample-ms", "50",
                 "--settle-timeout", "1", "--stats-ms", "50"] + list(extra)
+
+    def invoke(self, control=None, extra=(), expected=None, interrupt_signal=None, cleanup_signal=None):
+        if control is not None:
+            self.control.write_text(json.dumps(control))
+        args = self.runner_command(extra)
         env = dict(os.environ, EXPERIMENT_SECRET_TOKEN="do-not-record-fixture-secret",
                    MINIKV_SECRET_TOKEN="do-not-record-prefixed-secret", MINIKV_DATA_DIR=str(self.guard))
         previous_pids = {record["pid"] for record in self.pid_records()}
@@ -581,6 +683,35 @@ class ExperimentRunnerTests(unittest.TestCase):
                 for record in self.pid_records():
                     stopped = json.loads((self.fixtures / "stops" / (str(record["pid"]) + ".json")).read_text())
                     self.assertEqual(stopped["signal"], signal.SIGTERM, "terminal signal reached a child session directly")
+
+    @unittest.skipUnless(sys.platform == "linux", "parent-death protection uses Linux prctl")
+    def test_runner_sigkill_stops_children_even_when_sigterm_is_ignored(self):
+        self.control.write_text(json.dumps({"bench": "timeout", "ignore_term": ["engine", "gateway", "bench"]}))
+        command = self.runner_command(("--run-timeout", "30", "--startup-timeout", "3"))
+        self.runner = subprocess.Popen([sys.executable, "-c", RUNNER_DEATH_DRIVER, str(self.fixtures), json.dumps(command)],
+                                       cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            stdout, stderr = self.runner.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            # Let the driver clean up only its own children before failing.
+            self.runner.terminate()
+            stdout, stderr = self.runner.communicate(timeout=8)
+            self.fail("runner-death test driver timed out: %s\n%s" % (stdout, stderr))
+        log = self.fixtures / "hard-kill-runner.log"
+        details = log.read_text() if log.exists() else "(runner log was not created)"
+        self.assertEqual(self.runner.returncode, 0, "stdout=%s\nstderr=%s\nrunner=%s" % (stdout, stderr, details))
+        outcomes = json.loads(stdout)
+        records = self.assert_children_stopped()
+        self.assertEqual(set(outcomes), {"engine", "gateway", "bench"})
+        for record in records:
+            self.assertEqual(outcomes[record["role"]], {"pid": record["pid"], "signal": signal.SIGKILL})
+        self.assertEqual(list((self.fixtures / "stops").iterdir()), [], "a graceful signal masked runner death")
+        self.assertEqual(json.loads((self.output / "index.json").read_text())["status"], "running")
+        runs = list(self.output.glob("r*"))
+        self.assertEqual(len(runs), 1, "another case started after runner death")
+        result = json.loads((runs[0] / "result.json").read_text())
+        self.assertEqual(result["status"], "running")
+        self.assertNotIn("processes", result, "runner death invented normal exit evidence")
 
     def test_mixed_reports_cannot_include_disabled_operations(self):
         for write_ratio, delete_ratio, forbidden in ((0, 25, "put"), (25, 0, "delete"),

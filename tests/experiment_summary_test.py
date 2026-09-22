@@ -61,7 +61,7 @@ class ExperimentSummaryTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
 
-    def experiment(self, name="experiment", seed=1, binary_version="A", rate=0, max_data_bytes=0):
+    def experiment(self, name="experiment", seed=1, binary_version="A", rate=0, max_data_bytes=0, process_guard=False):
         directory = self.directory / name
         directory.mkdir()
         binaries = directory / "binaries"
@@ -97,6 +97,13 @@ class ExperimentSummaryTests(unittest.TestCase):
             "metadata": {"schema_version": 1, "binaries": identities,
                          "git": {"head": "a" * 40, "dirty": False, "tracked_diff_sha256": "b" * 64}},
         }
+        if process_guard:
+            helper = directory / "process_guard.py"
+            payload = b"raise SystemExit('summary must never execute this artifact')\n"
+            helper.write_bytes(payload)
+            manifest["process_guard"] = {"protocol": "linux-pdeathsig-v1", "path": str(helper),
+                                         "sha256": hashlib.sha256(payload).hexdigest(),
+                                         "python": sys.executable, "signal": "SIGKILL"}
         save_json(directory / "manifest.json", manifest)
         save_json(directory / "index.json", {"schema_version": 1, "status": "complete", "runs": [],
                                              "successful_runs": 0, "failed_runs": 0})
@@ -169,6 +176,10 @@ class ExperimentSummaryTests(unittest.TestCase):
                     "bench": {"argv": command, "environment": {}}}
         if args.get("max_data_bytes", 0):
             commands["engine"]["environment"]["MINIKV_MAX_DATA_BYTES"] = str(args["max_data_bytes"])
+        if "process_guard" in manifest:
+            guard = manifest["process_guard"]
+            commands["launcher"] = {"parent_pid": 4321,
+                                    "argv_prefix": [guard["python"], "-I", "-S", guard["path"], "4321"]}
         save_json(run / "commands.json", commands)
         result = {
             "schema_version": 1, "name": name, "wal_mode": mode, "snapshot_interval_ms": interval,
@@ -663,6 +674,134 @@ class ExperimentSummaryTests(unittest.TestCase):
         self.assertEqual(summary["counts"]["valid"], 0)
         self.assertEqual(summary["counts"]["invalid"], 2)
         self.assertTrue(summary["experiments"][0]["errors"])
+
+    def test_process_guard_and_legacy_manifests_remain_valid(self):
+        for guarded in (False, True):
+            with self.subTest(guarded=guarded):
+                directory = self.experiment("guard-" + str(guarded), process_guard=guarded)
+                self.add_run(directory)
+                summary = self.invoke([directory])
+                experiment = summary["experiments"][0]
+                self.assertEqual(summary["counts"]["valid"], 2)
+                self.assertEqual(experiment["binary_verification"], "copies_verified")
+                self.assertEqual(experiment["process_guard_verification"], "copy_verified" if guarded else "not_recorded")
+                self.assertEqual(experiment["warnings"], [])
+
+    def test_process_guard_manifest_metadata_is_strict(self):
+        faults = (("protocol", "other"), ("protocol", 1), ("signal", "SIGTERM"), ("signal", None),
+                  ("path", "process_guard.py"), ("path", "/unrelated/process_guard.py"), ("path", None),
+                  ("sha256", "f" * 63), ("sha256", "F" * 64), ("sha256", 1),
+                  ("python", "python3"), ("python", None), ("python", "/python\0wrong"))
+        for number, (field, value) in enumerate(faults):
+            with self.subTest(field=field, value=value):
+                directory = self.experiment("guard-metadata-%d" % number, process_guard=True)
+                self.add_run(directory)
+                manifest = json.loads((directory / "manifest.json").read_text())
+                manifest["process_guard"][field] = value
+                save_json(directory / "manifest.json", manifest)
+                self.assertIn("process guard", self.invoke([directory], expected=2).stderr)
+        for number, value in enumerate((None, [], {}, {"protocol": "linux-pdeathsig-v1"})):
+            with self.subTest(metadata=value):
+                directory = self.experiment("guard-shape-%d" % number, process_guard=True)
+                self.add_run(directory)
+                manifest = json.loads((directory / "manifest.json").read_text())
+                manifest["process_guard"] = value
+                save_json(directory / "manifest.json", manifest)
+                self.assertIn("process guard", self.invoke([directory], expected=2).stderr)
+
+    def test_process_guard_launcher_must_match_manifest(self):
+        faults = ("missing", "null", "parent_missing", "parent_zero", "parent_negative", "parent_bool",
+                  "parent_string", "parent_float", "prefix_missing", "prefix_string", "prefix_python",
+                  "prefix_isolation", "prefix_site", "prefix_helper", "prefix_parent", "prefix_extra",
+                  "wrapped_target")
+        for fault in faults:
+            with self.subTest(fault=fault):
+                directory = self.experiment("guard-launcher-" + fault, process_guard=True)
+                run = self.add_run(directory)
+                commands = json.loads((run / "commands.json").read_text())
+                launcher = commands["launcher"]
+                if fault == "missing":
+                    del commands["launcher"]
+                elif fault == "null":
+                    commands["launcher"] = None
+                elif fault == "parent_missing":
+                    del launcher["parent_pid"]
+                elif fault.startswith("parent_"):
+                    launcher["parent_pid"] = {"parent_zero": 0, "parent_negative": -1, "parent_bool": True,
+                                              "parent_string": "4321", "parent_float": 4321.0}[fault]
+                elif fault == "prefix_missing":
+                    del launcher["argv_prefix"]
+                elif fault == "prefix_string":
+                    launcher["argv_prefix"] = " ".join(launcher["argv_prefix"])
+                elif fault == "prefix_extra":
+                    launcher["argv_prefix"].append("unexpected")
+                elif fault == "wrapped_target":
+                    commands["engine"]["argv"] = launcher["argv_prefix"] + commands["engine"]["argv"]
+                else:
+                    position = {"prefix_python": 0, "prefix_isolation": 1, "prefix_site": 2,
+                                "prefix_helper": 3, "prefix_parent": 4}[fault]
+                    launcher["argv_prefix"][position] = "changed"
+                save_json(run / "commands.json", commands)
+                summary = self.invoke([directory], expected=1)
+                row = summary["experiments"][0]["groups"][0]["runs"][0]
+                self.assertEqual(row["status"], "invalid")
+                self.assertIsNone(row["qps_successful"])
+
+    def test_process_guard_launcher_without_manifest_metadata_is_rejected(self):
+        directory = self.experiment(process_guard=True)
+        self.add_run(directory)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        del manifest["process_guard"]
+        save_json(directory / "manifest.json", manifest)
+        summary = self.invoke([directory], expected=1)
+        self.assertEqual(summary["counts"]["invalid"], 2)
+        self.assertTrue(all("launcher lacks process guard" in " ".join(row["errors"])
+                            for group in summary["experiments"][0]["groups"] for row in group["runs"]))
+
+    def test_process_guard_copy_is_checked_without_changing_binary_verification(self):
+        for fault in ("bytes", "directory", "outside_symlink"):
+            with self.subTest(fault=fault):
+                directory = self.experiment("guard-copy-" + fault, process_guard=True)
+                self.add_run(directory)
+                helper = directory / "process_guard.py"
+                if fault == "bytes":
+                    helper.write_bytes(b"different helper\n")
+                else:
+                    helper.unlink()
+                    if fault == "directory":
+                        helper.mkdir()
+                    else:
+                        outside = self.directory / "outside-helper.py"
+                        outside.write_bytes(b"outside\n")
+                        helper.symlink_to(outside)
+                summary = self.invoke([directory], expected=1)
+                experiment = summary["experiments"][0]
+                self.assertEqual(summary["counts"]["invalid"], 2)
+                self.assertEqual(experiment["binary_verification"], "copies_verified")
+                self.assertEqual(experiment["process_guard_verification"], "invalid")
+                self.assertTrue(experiment["errors"])
+
+    def test_process_guard_archive_uses_only_relocated_copy_or_recorded_hash(self):
+        original = self.experiment("guard original", process_guard=True)
+        self.add_run(original)
+        archive = self.directory / "guard archive"
+        original.rename(archive)
+        original.mkdir()
+        (original / "process_guard.py").write_bytes(b"old absolute path must not be read\n")
+        for copies in ("all", "binaries", "none"):
+            with self.subTest(copies=copies):
+                if copies == "binaries":
+                    (archive / "process_guard.py").unlink()
+                elif copies == "none":
+                    shutil.rmtree(archive / "binaries")
+                summary = self.invoke([archive])
+                experiment = summary["experiments"][0]
+                self.assertEqual(summary["counts"]["valid"], 2)
+                self.assertEqual(experiment["binary_verification"], "recorded_hashes_only" if copies == "none" else "copies_verified")
+                self.assertEqual(experiment["process_guard_verification"], "copy_verified" if copies == "all" else "recorded_hashes_only")
+                if copies != "all":
+                    self.assertTrue(any("Process guard copy is absent" in warning and "recorded_hashes_only" in warning
+                                        for warning in experiment["warnings"]))
 
     def test_portable_archive_without_copies_uses_recorded_hashes_with_warning(self):
         original = self.experiment("original archive location")

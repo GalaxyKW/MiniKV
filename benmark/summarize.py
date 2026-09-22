@@ -91,6 +91,19 @@ def manifest_for(directory):
     require(args.get("op") in ("put", "get", "delete", "mixed")
             and args["write_ratio"] + args["delete_ratio"] <= 100, "invalid manifest workload")
     require(isinstance(args.get("output"), str) and Path(args["output"]).is_absolute(), "manifest output must be an absolute path")
+    if "process_guard" in manifest:
+        guard = manifest["process_guard"]
+        require(isinstance(guard, dict) and set(guard) == {"protocol", "path", "sha256", "python", "signal"},
+                "invalid process guard metadata")
+        require(guard["protocol"] == "linux-pdeathsig-v1" and guard["signal"] == "SIGKILL",
+                "unsupported process guard protocol or signal")
+        require(isinstance(guard["path"], str)
+                and guard["path"] == str(Path(args["output"]) / "process_guard.py"),
+                "process guard path differs from manifest output")
+        require(isinstance(guard["sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", guard["sha256"]),
+                "invalid process guard SHA256")
+        require(isinstance(guard["python"], str) and "\0" not in guard["python"]
+                and Path(guard["python"]).is_absolute(), "invalid process guard Python executable")
     modes = args.get("modes")
     require(isinstance(modes, list) and modes and all(mode in ("throughput", "reliable") for mode in modes)
             and len(set(modes)) == len(modes), "invalid manifest modes")
@@ -156,11 +169,39 @@ def verify_binaries(root, manifest):
     return errors, [], "invalid" if errors else "copies_verified"
 
 
+def verify_process_guard(root, manifest):
+    if "process_guard" not in manifest:
+        return [], [], "not_recorded"
+    try:
+        # Recorded absolute paths identify the original launch. Open only the
+        # archive-relative copy so moved archives never consult the old source.
+        path = safe_path(root, "process_guard.py")
+        if not path.exists():
+            return [], ["Process guard copy is absent; provenance uses recorded hashes only (recorded_hashes_only)."], "recorded_hashes_only"
+        require(path.is_file(), "copied process guard is not a regular file")
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        require(digest.hexdigest() == manifest["process_guard"]["sha256"], "copied process guard SHA256 mismatch")
+        return [], [], "copy_verified"
+    except (OSError, ValueError) as error:
+        return [str(error)], [], "invalid"
+
+
 def config_for(root, manifest, case):
     commands = load_json(safe_path(root, case["name"] + "/commands.json"))
     args = manifest["arguments"]
     require(isinstance(commands, dict) and commands.get("runtime_environment") == manifest["runtime_environment"],
             "command runtime environment differs from manifest")
+    if "process_guard" in manifest:
+        guard, launcher = manifest["process_guard"], commands.get("launcher")
+        require(isinstance(launcher, dict) and set(launcher) == {"parent_pid", "argv_prefix"}
+                and integer(launcher.get("parent_pid"), minimum=1), "invalid process guard launcher")
+        require(launcher["argv_prefix"] == [guard["python"], "-I", "-S", guard["path"], str(launcher["parent_pid"])],
+                "process guard launcher prefix differs from manifest")
+    else:
+        require("launcher" not in commands, "command launcher lacks process guard metadata")
     for role in ROLES:
         record = commands.get(role)
         require(isinstance(record, dict) and isinstance(record.get("argv"), list)
@@ -471,6 +512,9 @@ def distribution(values):
 
 def summarize_experiment(root, manifest):
     provenance_errors, provenance_warnings, verification = verify_binaries(root, manifest)
+    guard_errors, guard_warnings, guard_verification = verify_process_guard(root, manifest)
+    provenance_errors.extend(guard_errors)
+    provenance_warnings.extend(guard_warnings)
     groups = {}
     for case in manifest["plan"]:
         key = (case["wal_mode"], case["snapshot_interval_ms"])
@@ -496,6 +540,7 @@ def summarize_experiment(root, manifest):
             for role in ROLES}
     return {"path": str(root), "arguments": manifest["arguments"], "errors": provenance_errors,
             "warnings": provenance_warnings, "binary_verification": verification,
+            "process_guard_verification": guard_verification,
             "binary_sha256": {role: manifest["executables"][role]["sha256"] for role in ROLES},
             "counts": counts(rows), "groups": list(groups.values())}
 
