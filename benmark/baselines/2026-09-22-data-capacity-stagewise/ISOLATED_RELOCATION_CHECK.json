@@ -1,0 +1,281 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "recorded_at": "2026-09-22T13:21:58.456900+00:00",
+  "purpose": "Actual unpack/move/offline audit of formal evidence; no services or measurements executed.",
+  "command": [
+    "/usr/bin/python3",
+    "-I",
+    "-B",
+    "/mnt/nvme/MiniKV/benmark/baselines/2026-09-22-data-capacity-stagewise/ISOLATED_RELOCATION_CHECK.py",
+    "/mnt/nvme/MiniKV/benmark/baselines/2026-09-22-data-capacity-stagewise",
+    "--git-repository",
+    "/mnt/nvme/MiniKV",
+    "--temporary-parent",
+    "/mnt/nvme/minikv-review"
+  ],
+  "script_sha256": "41410ac0cc67a8a8690a62d7aa70b677bd91e25a370b13256ed1f81554b5e58f",
+  "temporary_directory": "/mnt/nvme/minikv-review/capacity-isolated-relocation-9p6iotj5",
+  "relocated_root": "/mnt/nvme/minikv-review/capacity-isolated-relocation-9p6iotj5/relocated/data-capacity-stagewise",
+  "forbidden_original_root": "/mnt/nvme/minikv-review/capacity-stagewise-iobxnqbx",
+  "original_root_open_attempts": [],
+  "offline_disallowed_actions": [],
+  "collector": {
+    "revision": "bc7e031a962ff44367a160a5fc5adcda83ac1893",
+    "git_archive_command": [
+      "git",
+      "--no-optional-locks",
+      "-C",
+      "/mnt/nvme/MiniKV",
+      "archive",
+      "--format=tar",
+      "bc7e031a962ff44367a160a5fc5adcda83ac1893",
+      "benmark/experiment.py",
+      "benmark/summarize.py",
+      "benmark/experiment_support.py",
+      "benmark/snapshot_report.py",
+      "benmark/process_guard.py"
+    ],
+    "git_archive_exit_code": 0,
+    "files_sha256": {
+      "benmark/experiment.py": "0be694985b46810ecd98703bbecb918bbb2a9d98ea3f87abc3e6786fed1f763d",
+      "benmark/summarize.py": "aab09c5ec018c1e294874473c16516ce366daca1506eb869e310296a6929994f",
+      "benmark/experiment_support.py": "4a99a96526f934bd2521f545d09bce439e053d9dcf6de8297d570b38d198c0fe",
+      "benmark/snapshot_report.py": "922944a0668a2ba42ef3407086f252d0b3bae109cdf03a5566f467cf6a8d6f7d",
+      "benmark/process_guard.py": "92c5bbc531d21dd5dbcea767d9081a808ca588d239a87c4ba302f08d94e4b692"
+    }
+  },
+  "archive": {
+    "file": "data-capacity-stagewise.tar.gz",
+    "sha256": "e05918769798088f1eafc214b0c77b51cdd642314b3819cddc9f115dee80827b",
+    "size_bytes": 2732956,
+    "members_verified": 619,
+    "raw_bytes_verified": 35865235,
+    "all_members_regular_unique_safe_paths": true,
+    "all_members_unchanged_after_audit": true
+  },
+  "attachments_verified": [
+    "audit_capacity.py",
+    "analysis.json",
+    "analysis.csv",
+    "package_evidence.py"
+  ],
+  "auditor": {
+    "file": "audit_capacity.py",
+    "sha256": "2be891e89620388e727460c384be9272795acbdecb8c1d7b0573209138f01afc",
+    "logical_command": [
+      "/usr/bin/python3",
+      "/mnt/nvme/MiniKV/benmark/baselines/2026-09-22-data-capacity-stagewise/audit_capacity.py",
+      "/mnt/nvme/minikv-review/capacity-isolated-relocation-9p6iotj5/relocated/data-capacity-stagewise",
+      "--repository",
+      "/mnt/nvme/minikv-review/capacity-isolated-relocation-9p6iotj5/collector"
+    ],
+    "execution": "runpy under same-process Python audit hook",
+    "exit_code": 0,
+    "stdout": "{\"eligible_rounds\": 48, \"inconclusive_comparisons\": 0, \"official_status\": {\"degraded\": 0, \"failed\": 0, \"incomplete\": 0, \"interrupted\": 0, \"invalid\": 0, \"missing\": 0, \"valid\": 48}, \"planned_rounds\": 48}\n",
+    "stderr": "",
+    "distinct_files_opened": 479
+  },
+  "counts": {
+    "planned_rounds": 48,
+    "eligible_rounds": 48,
+    "official_status": {
+      "valid": 48,
+      "degraded": 0,
+      "failed": 0,
+      "interrupted": 0,
+      "missing": 0,
+      "incomplete": 0,
+      "invalid": 0
+    },
+    "inconclusive_comparisons": 0
+  },
+  "pairs": 32,
+  "comparisons": 8,
+  "eligible_pairs_each_comparison": [
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4
+  ],
+  "classifications": {
+    "not_triggered": 8
+  },
+  "rss_diagnostics": {
+    "not_triggered": 8
+  },
+  "binary_verification": {
+    "recorded_hashes_only": 12
+  },
+  "process_guard_verification": {
+    "copy_verified": 12
+  },
+  "comparison": {
+    "rounds_exact_equal": true,
+    "pairs_exact_equal": true,
+    "comparisons_exact_equal": true,
+    "all_analysis_equal_after_explicit_allowances": true,
+    "allowed_differences": [
+      {
+        "path": "warnings",
+        "before": [],
+        "after": [
+          "frozen/engine-A absent; recorded hashes only",
+          "frozen/engine-B absent; recorded hashes only",
+          "frozen/gateway absent; recorded hashes only",
+          "frozen/bench absent; recorded hashes only"
+        ]
+      },
+      {
+        "path": "stages[0].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[0].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[1].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[1].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[2].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[2].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[3].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[3].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[4].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[4].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[5].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[5].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[6].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[6].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[7].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[7].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[8].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[8].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[9].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[9].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[10].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[10].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      },
+      {
+        "path": "stages[11].binary_verification",
+        "before": "copies_verified",
+        "after": "recorded_hashes_only"
+      },
+      {
+        "path": "stages[11].warnings",
+        "before": [],
+        "after": [
+          "Executable copies are absent; provenance uses recorded hashes only (recorded_hashes_only)."
+        ]
+      }
+    ]
+  },
+  "raw_package_and_supplied_analysis_modified": false,
+  "scope_limit": "Manifest contents were used for member/attachment checks; the manifest itself is not self-hashed in this result. Validation fixture scripts were retained but not executed."
+}

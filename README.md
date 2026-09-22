@@ -187,7 +187,7 @@ make sanitize-test
 | 快照写出缓冲 | 实际写调用与写出阶段耗时减少，仍有端到端回退和极端尾延迟，尚未通过整体性能验收；捕获持锁仍需改善 | [相同指标下的对照](docs/performance-snapshot-accounting.md) |
 | 共享不可变值的快照捕获 | 捕获持锁下降，关闭快照时内存增加；端到端仍有回退，原型尚未采用 | [原型对照与覆盖边界](docs/performance-snapshot-shared-values.md) |
 | 固定到达率与请求名额 | 18 轮对照区分客户端丢弃和后端拒绝；确认等待可占满名额，同时数据 worker 样本仍空闲 | [名额限制、损失与原始归档](docs/performance-fixed-arrival.md) |
-| 逻辑数据容量 | 48 轮计划中 33 轮通过核验，另有 1 轮证据不足、14 轮未执行；保留中断证据，尚不能判断性能开销 | [容量配置、完整性与复查](docs/performance-data-capacity.md) |
+| 逻辑数据容量 | 独立 48 轮小数据集纯 PUT 全部有效，八组比较未触发预设调查条件；保留单轮尾延迟增加，不代表零开销或性能等价 | [完整矩阵与证据范围](docs/performance-data-capacity-stagewise.md)、[旧中断记录](docs/performance-data-capacity.md) |
 
 ### 自己运行并核对结果
 
