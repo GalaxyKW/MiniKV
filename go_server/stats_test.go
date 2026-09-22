@@ -18,7 +18,15 @@ import (
 	"time"
 )
 
-const validStatsPayload = `{"schema_version":1,"engine":{"wal_mode":"reliable","keys":7,"applied_sequence":12,"durable_sequence":11,"wal_pending_bytes":128,"wal_inflight_bytes":64,"wal_queued_records":1,"wal_queue_capacity_bytes":1024},"server":{"connections":3,"connection_capacity":8,"request_queue_depth":1,"request_queue_capacity":16,"workers_active":2,"workers_capacity":4}}`
+const validStatsPayload = `{"schema_version":1,"engine":{
+"wal_mode":"reliable","keys":7,"applied_sequence":12,"durable_sequence":11,
+"wal_pending_bytes":128,"wal_inflight_bytes":64,"wal_queued_records":1,"wal_queue_capacity_bytes":1024,
+"wal_commits_total":0,"wal_commit_failures_total":0,"wal_commit_duration_ns_total":0,"wal_commit_last_duration_ns":0,
+"snapshot_successes_total":0,"snapshot_failures_total":0,"snapshot_in_progress":false,"snapshot_sequence":0,
+"snapshot_capture_duration_ns_total":0,"snapshot_write_duration_ns_total":0,"snapshot_compact_duration_ns_total":0,
+"io_failed":false,"stopping":false},"server":{
+"connections":3,"connection_capacity":8,"request_queue_depth":1,"request_queue_capacity":16,
+"workers_active":2,"workers_capacity":4,"requests_rejected_total":0,"connections_rejected_total":0}}`
 
 func TestStatsRequestHasNoKeyOrValue(t *testing.T) {
 	frame, err := encodeRequest(rpcRequest{op: opStats})
@@ -85,6 +93,54 @@ func TestStatsHTTPReturnsOnlyDefinedAggregates(t *testing.T) {
 	if result.Gateway.RPC != data.stats() || result.Gateway.RPC.CallsTotal != 1 || result.Gateway.RPC.ErrorsTotal != 1 ||
 		result.Gateway.UptimeSeconds < 1 || result.Gateway.UptimeSeconds >= 999999 {
 		t.Fatalf("gateway stats were not locally collected: %#v", result.Gateway)
+	}
+}
+
+func TestStatsHTTPRejectsMissingOrNullBaseMeasurements(t *testing.T) {
+	var baseline map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(validStatsPayload), &baseline); err != nil {
+		t.Fatal(err)
+	}
+	data := newRPCClient("unused", 2, time.Second)
+	defer data.Close()
+	// Exercise every original field from the complete wire fixture, including
+	// legitimate zero counters and false health flags. Optional counters are
+	// intentionally absent here and retain their separate compatibility tests.
+	for _, section := range []string{"engine", "server"} {
+		var original map[string]json.RawMessage
+		if err := json.Unmarshal(baseline[section], &original); err != nil {
+			t.Fatal(err)
+		}
+		for field := range original {
+			for _, missing := range []bool{true, false} {
+				t.Run(fmt.Sprintf("%s/%s/missing=%t", section, field, missing), func(t *testing.T) {
+					var backend map[string]map[string]json.RawMessage
+					if err := json.Unmarshal([]byte(`{"engine":`+string(baseline["engine"])+`,"server":`+string(baseline["server"])+`}`), &backend); err != nil {
+						t.Fatal(err)
+					}
+					if missing {
+						delete(backend[section], field)
+					} else {
+						backend[section][field] = json.RawMessage(`null`)
+					}
+					payload, err := json.Marshal(map[string]any{"schema_version": 1, "engine": backend["engine"], "server": backend["server"]})
+					if err != nil {
+						t.Fatal(err)
+					}
+					client := &fakeClient{response: rpcResponse{status: statusValue, value: string(payload)}}
+					response := httptest.NewRecorder()
+					newStatsHandler(client, data, time.Now()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/stats", nil))
+					var result runtimeStats
+					if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+						t.Fatal(err)
+					}
+					if response.Code != http.StatusBadGateway || result.Error != "invalid_backend_stats" ||
+						result.Engine != nil || result.Server != nil || result.Gateway == nil {
+						t.Fatalf("missing measurement became valid state: code=%d body=%s", response.Code, response.Body.String())
+					}
+				})
+			}
+		}
 	}
 }
 

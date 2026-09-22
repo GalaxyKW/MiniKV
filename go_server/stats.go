@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -127,13 +128,46 @@ type runtimeStats struct {
 	Error         string        `json:"error,omitempty"`
 }
 
+// These fields are part of the original stats schema. Newer optional counters
+// use pointers above; absent base measurements must never become measured zero.
+var requiredStatsFields = map[string][]string{
+	"engine": {
+		"wal_mode", "keys", "applied_sequence", "durable_sequence", "wal_pending_bytes",
+		"wal_inflight_bytes", "wal_queued_records", "wal_queue_capacity_bytes",
+		"wal_commits_total", "wal_commit_failures_total", "wal_commit_duration_ns_total",
+		"wal_commit_last_duration_ns", "snapshot_successes_total", "snapshot_failures_total",
+		"snapshot_in_progress", "snapshot_sequence", "snapshot_capture_duration_ns_total",
+		"snapshot_write_duration_ns_total", "snapshot_compact_duration_ns_total", "io_failed", "stopping",
+	},
+	"server": {
+		"connections", "connection_capacity", "request_queue_depth", "request_queue_capacity",
+		"workers_active", "workers_capacity", "requests_rejected_total", "connections_rejected_total",
+	},
+}
+
 func decodeStats(payload string) (runtimeStats, error) {
+	data := []byte(payload)
 	var result runtimeStats
-	if err := json.Unmarshal([]byte(payload), &result); err != nil {
+	if err := json.Unmarshal(data, &result); err != nil {
 		return runtimeStats{}, err
 	}
 	if result.SchemaVersion != 1 || result.Engine == nil || result.Server == nil || result.Error != "" {
 		return runtimeStats{}, errors.New("invalid stats envelope")
+	}
+	var raw struct {
+		Engine map[string]json.RawMessage `json:"engine"`
+		Server map[string]json.RawMessage `json:"server"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return runtimeStats{}, err
+	}
+	for section, fields := range map[string]map[string]json.RawMessage{"engine": raw.Engine, "server": raw.Server} {
+		for _, name := range requiredStatsFields[section] {
+			value := bytes.TrimSpace(fields[name])
+			if len(value) == 0 || bytes.Equal(value, []byte("null")) {
+				return runtimeStats{}, errors.New("missing or null required stats field")
+			}
+		}
 	}
 	engine, server := result.Engine, result.Server
 	if (engine.WalMode != "throughput" && engine.WalMode != "reliable") ||
