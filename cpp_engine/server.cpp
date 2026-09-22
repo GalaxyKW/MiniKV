@@ -453,7 +453,11 @@ private:
         std::array<char, 8192> buffer{};
         constexpr size_t limit = codec::kRequestHeader + kMaxKeySize + kMaxValueSize;
         while (true) {
-            if (stopping.load(std::memory_order_relaxed)) { close_client(id); return; }
+            // SIGTERM can arrive after the reactor's shutdown check, including
+            // while epoll_wait returns readable pipelined input. This idle
+            // client may still have a reply queued in TCP, so preserve it via
+            // the same half-close and input drain used by the reactor loop.
+            if (stopping.load(std::memory_order_relaxed)) { begin_shutdown(); return; }
             const size_t space = std::min(buffer.size(), limit - client.input.size());
             const ssize_t count = ::recv(client.fd, buffer.data(), space, 0);
             if (count < 0) {
