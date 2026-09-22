@@ -209,6 +209,67 @@ void legacy_upgrade_is_checkpointed_before_use() {
     }
 }
 
+void frozen_legacy_files_remain_compatible() {
+    // Frozen with the pre-v2 codec at 6407aa7 and independently checked using
+    // big-endian packing + IEEE CRC32. Do not regenerate with the current codec.
+    // Checkpoint 2: changed=before, deleted=before. WAL 1..2 is covered;
+    // 3 adds a NUL-containing value, 4 deletes, and 5 overwrites changed.
+    static constexpr char snapshot[] =
+        "\x4d\x4b\x56\x53\x4e\x50\x30\x31\x00\x00\x00\x00\x00\x00\x00\x02"
+        "\x00\x00\x00\x00\x00\x00\x00\x02\x66\xf5\x8b\x95\x4d\x4b\x4c\x31"
+        "\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x07\x00\x00\x00"
+        "\x06\x63\x68\x61\x6e\x67\x65\x64\x62\x65\x66\x6f\x72\x65\x06\x55"
+        "\x22\x0b\x4d\x4b\x4c\x31\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00"
+        "\x00\x00\x07\x00\x00\x00\x06\x64\x65\x6c\x65\x74\x65\x64\x62\x65"
+        "\x66\x6f\x72\x65\x43\xb0\xed\xf9";
+    static constexpr char wal[] =
+        "\x4d\x4b\x4c\x31\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00"
+        "\x07\x00\x00\x00\x03\x63\x6f\x76\x65\x72\x65\x64\x6f\x6c\x64\x31"
+        "\x40\x83\xf3\x4d\x4b\x4c\x31\x03\x00\x00\x00\x00\x00\x00\x00\x02"
+        "\x00\x00\x00\x07\x00\x00\x00\x00\x63\x6f\x76\x65\x72\x65\x64\x55"
+        "\x32\xbe\x79\x4d\x4b\x4c\x31\x01\x00\x00\x00\x00\x00\x00\x00\x03"
+        "\x00\x00\x00\x05\x00\x00\x00\x03\x61\x64\x64\x65\x64\x61\x00\x62"
+        "\x6b\xf5\x8e\x64\x4d\x4b\x4c\x31\x03\x00\x00\x00\x00\x00\x00\x00"
+        "\x04\x00\x00\x00\x07\x00\x00\x00\x00\x64\x65\x6c\x65\x74\x65\x64"
+        "\x4c\x42\x39\xe4\x4d\x4b\x4c\x31\x01\x00\x00\x00\x00\x00\x00\x00"
+        "\x05\x00\x00\x00\x07\x00\x00\x00\x05\x63\x68\x61\x6e\x67\x65\x64"
+        "\x61\x66\x74\x65\x72\x88\x88\xc4\x3a";
+    // The first 35-byte record alone is fully checkpointed: replaying it would
+    // resurrect covered, unlike replaying the complete PUT/DELETE prefix.
+    for (const size_t wal_size : {size_t{0}, size_t{35}, sizeof(wal) - 1}) {
+        const bool replay = wal_size == sizeof(wal) - 1;
+        TempDir dir;
+        write_file(dir.path + "/snapshot.v1", std::string(snapshot, sizeof(snapshot) - 1));
+        write_file(dir.path + "/wal.v1", std::string(wal, wal_size));
+        const auto config = config_for(dir);
+        const uint64_t sequence = replay ? 5 : 2;
+        const auto verify = [replay](Engine& engine) {
+            require(get(engine, "changed").value == (replay ? "after" : "before") &&
+                    get(engine, "covered").status == Status::NotFound, "frozen checkpoint replay changed values");
+            if (replay) {
+                require(get(engine, "deleted").status == Status::NotFound &&
+                        get(engine, "added").value == std::string("a\0b", 3), "frozen DELETE or binary PUT lost");
+            } else {
+                require(get(engine, "deleted").value == "before" &&
+                        get(engine, "added").status == Status::NotFound, "checkpoint-only legacy WAL changed data");
+            }
+        };
+        {
+            Engine upgraded(config);
+            verify(upgraded);
+            require(upgraded.durable_sequence() == sequence && upgraded.stats().snapshot_successes_total == 1 &&
+                    read_file(dir.path + "/wal.v1") == codec::wal_file_header(), "frozen legacy upgrade incomplete");
+            put(upgraded, "next", std::string("v\0two", 5));
+            upgraded.close();
+        }
+        Engine reopened(config);
+        verify(reopened);
+        require(get(reopened, "next").value == std::string("v\0two", 5) &&
+                reopened.durable_sequence() == sequence + 1 && reopened.stats().snapshot_successes_total == 0,
+                "frozen legacy upgrade did not preserve subsequent writes across restart");
+    }
+}
+
 void interrupted_upgrades_remain_recoverable() {
     for (const std::string point : {"snapshot.write", "snapshot.sync", "snapshot.rename", "snapshot.dir_sync",
                                    "snapshot.after_install", "wal.truncate", "wal.compact.write", "wal.compact.sync",
@@ -273,6 +334,7 @@ int main(int argc, char** argv) {
         {"v2 torn tails", every_v2_record_tail_boundary_recovers},
         {"legacy ambiguous tails", legacy_ambiguous_tails_preserve_originals},
         {"legacy upgrade", legacy_upgrade_is_checkpointed_before_use},
+        {"frozen legacy compatibility", frozen_legacy_files_remain_compatible},
         {"upgrade crash boundaries", interrupted_upgrades_remain_recoverable},
         {"legacy downgrade rejection", header_only_wal_cannot_be_a_legacy_tail},
     };

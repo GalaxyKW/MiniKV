@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zlib
 from urllib.parse import urlencode
 
 
@@ -839,6 +840,69 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(after["engine"]["applied_sequence"] - before["engine"]["applied_sequence"], 23 + writes)
         self.assertEqual(after["engine"]["durable_sequence"], after["engine"]["applied_sequence"])
         self.assertEqual(after["gateway"]["rpc"]["calls_total"] - before["gateway"]["rpc"]["calls_total"], 23 + 257)
+
+
+class MiniKVStartup(unittest.TestCase):
+    @staticmethod
+    def environment(directory):
+        env = {key: value for key, value in os.environ.items() if not key.startswith("MINIKV_")}
+        env.update({"MINIKV_DATA_DIR": str(directory), "MINIKV_SNAPSHOT_INTERVAL_MS": "0"})
+        return env
+
+    @staticmethod
+    def legacy_binary_files(directory):
+        directory.mkdir()
+        header = struct.pack("!8sQQ", b"MKVSNP01", 0, 0)
+        record = struct.pack("!4sBQII", b"MKL1", 1, 1, 4, 5) + b"keptvalue"
+        (directory / "snapshot.v1").write_bytes(header + struct.pack("!I", zlib.crc32(header)))
+        (directory / "wal.v1").write_bytes(record + struct.pack("!I", zlib.crc32(record)))
+
+    def test_invalid_server_configuration_does_not_open_storage(self):
+        invalid = {
+            "MINIKV_WORKERS": "0",
+            "MINIKV_REQUEST_QUEUE_SIZE": "0",
+            "MINIKV_MAX_CONNECTIONS": "0",
+            "MINIKV_CLIENT_IDLE_MS": "0",
+            "MINIKV_ENGINE_PORT": "0",
+            "MINIKV_ENGINE_HOST": "localhost",
+        }
+        for name, value in invalid.items():
+            for legacy in (False, True):
+                with self.subTest(variable=name, legacy=legacy), tempfile.TemporaryDirectory() as temporary:
+                    directory = Path(temporary) / "data"
+                    if legacy:
+                        self.legacy_binary_files(directory)
+                    before = {path.name: path.read_bytes() for path in directory.glob("*")}
+                    env = self.environment(directory)
+                    env[name] = value
+                    result = subprocess.run([str(ENGINE)], env=env, capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(name, result.stderr)
+                    self.assertEqual(directory.exists(), legacy, "invalid configuration created storage")
+                    self.assertEqual({path.name: path.read_bytes() for path in directory.glob("*")}, before,
+                                     "invalid configuration opened or upgraded storage")
+
+    def test_import_ignores_server_only_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "data"
+            directory.mkdir()
+            originals = {"data.db": b"kept:value\n", "wal.log": b"PUT added imported\n"}
+            for name, value in originals.items():
+                (directory / name).write_bytes(value)
+            env = self.environment(directory)
+            for name in ("WORKERS", "REQUEST_QUEUE_SIZE", "MAX_CONNECTIONS", "CLIENT_IDLE_MS",
+                         "ENGINE_PORT", "ENGINE_HOST"):
+                env["MINIKV_" + name] = "invalid"
+            result = subprocess.run([str(ENGINE), "--import-legacy"], env=env,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Legacy import complete", result.stdout)
+            self.assertNotIn("listening", result.stdout)
+            self.assertEqual({name: (directory / name).read_bytes() for name in originals}, originals)
+            self.assertEqual((directory / "wal.v1").read_bytes()[:8], b"MKVWAL02")
+            snapshot = (directory / "snapshot.v1").read_bytes()
+            self.assertEqual(snapshot[:8], b"MKVSNP01")
+            self.assertEqual(struct.unpack("!QQ", snapshot[8:24]), (1, 2))
 
 
 if __name__ == "__main__":

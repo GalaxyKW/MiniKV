@@ -15,6 +15,7 @@
 #include <linux/sockios.h>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <sys/epoll.h>
@@ -48,6 +49,30 @@ int env_int(const char* name, int fallback, int minimum, int maximum) {
 std::string env_string(const char* name, const char* fallback) {
     const char* raw = std::getenv(name);
     return raw ? raw : fallback;
+}
+
+struct ServerConfig {
+    size_t workers;
+    size_t queue_capacity;
+    size_t max_connections;
+    std::chrono::milliseconds idle_timeout;
+    std::string host;
+    uint16_t port;
+    in_addr address;
+};
+
+ServerConfig read_server_config() {
+    ServerConfig config{};
+    config.workers = env_int("MINIKV_WORKERS", 20, 1, 1024);
+    config.queue_capacity = env_int("MINIKV_REQUEST_QUEUE_SIZE", 128, 1, 65536);
+    config.max_connections = env_int("MINIKV_MAX_CONNECTIONS", 256, 1, 65536);
+    config.idle_timeout = std::chrono::milliseconds(env_int("MINIKV_CLIENT_IDLE_MS", 30000, 1, 3600000));
+    config.port = static_cast<uint16_t>(env_int("MINIKV_ENGINE_PORT", 9090, 1, 65535));
+    config.host = env_string("MINIKV_ENGINE_HOST", "127.0.0.1");
+    if (::inet_pton(AF_INET, config.host.c_str(), &config.address) != 1) {
+        throw std::invalid_argument("MINIKV_ENGINE_HOST must be an IPv4 address");
+    }
+    return config;
 }
 
 [[noreturn]] void network_error(const char* operation) {
@@ -171,13 +196,13 @@ RequestTicket::~RequestTicket() {
 // only; idle connections and partial frames never occupy a worker.
 class Server {
 public:
-    Server(Engine& engine, size_t workers, size_t queue_capacity)
+    Server(Engine& engine, const ServerConfig& config)
         : engine_(engine),
           asynchronous_replies_(engine.stats().wal_mode == WalMode::Reliable),
-          pool_(workers, queue_capacity),
-          sink_(std::make_shared<CompletionSink>(workers + queue_capacity)),
-          max_connections_(env_int("MINIKV_MAX_CONNECTIONS", 256, 1, 65536)),
-          idle_timeout_(env_int("MINIKV_CLIENT_IDLE_MS", 30000, 1, 3600000)) {
+          pool_(config.workers, config.queue_capacity),
+          sink_(std::make_shared<CompletionSink>(config.workers + config.queue_capacity)),
+          max_connections_(config.max_connections),
+          idle_timeout_(config.idle_timeout) {
         try {
             ready_completions_.reserve(sink_->capacity() + 2);
             epoll_fd_ = ::epoll_create1(EPOLL_CLOEXEC);
@@ -188,15 +213,13 @@ public:
             if (::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) network_error("SO_REUSEADDR");
             sockaddr_in address{};
             address.sin_family = AF_INET;
-            const int port = env_int("MINIKV_ENGINE_PORT", 9090, 1, 65535);
-            address.sin_port = htons(static_cast<uint16_t>(port));
-            const auto host = env_string("MINIKV_ENGINE_HOST", "127.0.0.1");
-            if (::inet_pton(AF_INET, host.c_str(), &address.sin_addr) != 1) throw std::invalid_argument("MINIKV_ENGINE_HOST must be an IPv4 address");
+            address.sin_port = htons(config.port);
+            address.sin_addr = config.address;
             if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) network_error("bind");
             if (::listen(listen_fd_, 256) != 0) network_error("listen");
             add_fd(listen_fd_, 1, EPOLLIN);
             add_fd(sink_->fd(), 2, EPOLLIN);
-            std::cout << "MiniKV engine listening on " << host << ':' << port << std::endl;
+            std::cout << "MiniKV engine listening on " << config.host << ':' << config.port << std::endl;
         } catch (...) {
             release();
             throw;
@@ -685,11 +708,13 @@ int main(int argc, char** argv) {
         config.wal_queue_bytes = env_int("MINIKV_WAL_QUEUE_BYTES", 16 * 1024 * 1024, 2 * 1024 * 1024, 1024 * 1024 * 1024);
         config.wal_flush_interval = std::chrono::milliseconds(env_int("MINIKV_WAL_FLUSH_MS", 100, 1, 60000));
         config.snapshot_interval = std::chrono::milliseconds(env_int("MINIKV_SNAPSHOT_INTERVAL_MS", 1200000, 0, 86400000));
-        // Import never starts a server and historically ignored server-only
-        // settings, so preserve that behavior while parsing runtime limits once.
-        const size_t workers = config.import_legacy ? 20 : env_int("MINIKV_WORKERS", 20, 1, 1024);
-        const size_t queue_capacity = config.import_legacy ? 128 : env_int("MINIKV_REQUEST_QUEUE_SIZE", 128, 1, 65536);
-        config.max_async_requests = workers + queue_capacity;
+        // Recovery may repair or upgrade files. Reject malformed server settings
+        // before opening storage, while import continues to ignore them entirely.
+        std::optional<ServerConfig> server_config;
+        if (!config.import_legacy) {
+            server_config = read_server_config();
+            config.max_async_requests = server_config->workers + server_config->queue_capacity;
+        }
         Engine engine(config);
         if (config.import_legacy) {
             engine.close();
@@ -699,7 +724,7 @@ int main(int argc, char** argv) {
         std::signal(SIGTERM, stop_server);
         std::signal(SIGINT, stop_server);
         {
-            Server server(engine, workers, queue_capacity);
+            Server server(engine, *server_config);
             server.run();
         }
     } catch (const std::exception& error) {
