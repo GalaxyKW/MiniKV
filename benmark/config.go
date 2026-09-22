@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 )
 
 func parseConfig(args []string, output io.Writer) (benchConfig, error) {
@@ -39,12 +40,16 @@ func parseConfig(args []string, output io.Writer) (benchConfig, error) {
 		return benchConfig{}, fmt.Errorf("workers、requests 和 keyspace 必须大于 0")
 	}
 	maxInt := int(^uint(0) >> 1)
+	// Keep the requested-worker range shared by the experiment/report tools.
 	if cfg.workers > maxInt/4 {
-		return benchConfig{}, fmt.Errorf("workers 太大，连接池容量会溢出")
+		return benchConfig{}, fmt.Errorf("workers 太大，超过支持的配置范围")
 	}
 	// time.Duration is int64; the exact latency slice needs eight bytes per request.
 	if cfg.requests > maxInt/8 {
 		return benchConfig{}, fmt.Errorf("requests 太大，延迟切片大小会溢出")
+	}
+	if cfg.workerCount() > maxInt/int(unsafe.Sizeof(benchResult{})) {
+		return benchConfig{}, fmt.Errorf("实际 workers 太大，结果切片大小会溢出")
 	}
 	if cfg.timeout <= 0 {
 		return benchConfig{}, fmt.Errorf("timeout 必须大于 0")

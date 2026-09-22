@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func TestClassifyRequiresBothStatusAndProtocol(t *testing.T) {
@@ -39,7 +42,7 @@ func TestPreloadOptOutAndFailures(t *testing.T) {
 	}))
 	defer server.Close()
 	cfg := benchConfig{baseURL: server.URL, op: "mixed", keyspace: 1, preloadCount: 1, valueSize: 1}
-	client := newHTTPClient(time.Second, 1)
+	client := newHTTPClient(benchConfig{timeout: time.Second, workers: 1, requests: 1})
 	defer client.CloseIdleConnections()
 	if err := preloadData(cfg, client); err != nil {
 		t.Fatalf("preload=false still made a request: %v", err)
@@ -47,6 +50,61 @@ func TestPreloadOptOutAndFailures(t *testing.T) {
 	cfg.preload = true
 	if err := preloadData(cfg, client); err == nil {
 		t.Fatal("preload failure was ignored")
+	}
+}
+
+func TestRunBoundsWorkersByRequests(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	// The first count passed the old config checks but its result array could
+	// not fit in an int-sized address space. It must never be allocated here.
+	for _, workers := range []int{maxInt/int(unsafe.Sizeof(benchResult{})) + 1, maxInt / 4} {
+		t.Run(strconv.Itoa(workers), func(t *testing.T) {
+			var received atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				received.Add(1)
+				fmt.Fprint(w, "VALUE result\n")
+			}))
+			defer server.Close()
+			defer func() {
+				if failure := recover(); failure != nil {
+					t.Fatalf("one-request benchmark allocated resources for %d workers: %v", workers, failure)
+				}
+			}()
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"-url", server.URL, "-op", "get", "-workers", strconv.Itoa(workers),
+				"-requests", "1", "-preload=false", "-format", "json"}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("one-request benchmark exited %d: %s", code, stderr.String())
+			}
+			report := decodeOnlyReport(t, stdout.Bytes())
+			if report.Config.Workers != workers || report.Config.Requests != 1 {
+				t.Errorf("requested configuration was changed: %#v", report.Config)
+			}
+			if received.Load() != 1 || report.Outcomes != (outcomeReport{Requests: 1, Successes: 1}) ||
+				report.LatencyNS.Samples != 1 || report.Operations["get"] != 1 {
+				t.Errorf("incorrect single-request measurement: received=%d report=%#v", received.Load(), report)
+			}
+		})
+	}
+}
+
+func TestHTTPConnectionPoolIsBoundedByRequestCount(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	for _, test := range []struct {
+		workers, requests, connections int
+	}{
+		{1, 10, 4}, {3, 10, 12}, {50, 2, 8}, {maxInt / 4, 1, 4},
+	} {
+		client := newHTTPClient(benchConfig{timeout: time.Second, workers: test.workers, requests: test.requests})
+		transport := client.Transport.(*http.Transport)
+		if transport.MaxIdleConns != test.connections || transport.MaxIdleConnsPerHost != test.connections {
+			t.Errorf("workers=%d requests=%d: connection pool limits=%d/%d, want %d",
+				test.workers, test.requests, transport.MaxIdleConns, transport.MaxIdleConnsPerHost, test.connections)
+		}
+		if client.Timeout != time.Second {
+			t.Errorf("client timeout changed: %v", client.Timeout)
+		}
+		client.CloseIdleConnections()
 	}
 }
 

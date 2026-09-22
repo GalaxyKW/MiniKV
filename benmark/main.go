@@ -32,6 +32,11 @@ type benchConfig struct {
 	format       string
 }
 
+func (cfg benchConfig) workerCount() int {
+	// Workers beyond the number of jobs cannot add concurrency.
+	return min(cfg.workers, cfg.requests)
+}
+
 type benchResult struct {
 	latencies            []time.Duration
 	successes            int64
@@ -56,13 +61,14 @@ type kvRequest struct {
 	Value string `json:"value"`
 }
 
-func newHTTPClient(timeout time.Duration, workers int) *http.Client {
+func newHTTPClient(cfg benchConfig) *http.Client {
+	workers := cfg.workerCount()
 	transport := &http.Transport{
 		MaxIdleConns:        workers * 4,
 		MaxIdleConnsPerHost: workers * 4,
 		IdleConnTimeout:     30 * time.Second,
 	}
-	return &http.Client{Timeout: timeout, Transport: transport,
+	return &http.Client{Timeout: cfg.timeout, Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
@@ -183,7 +189,8 @@ func runBenchmarkWithProgress(cfg benchConfig, progress io.Writer) (benchResult,
 		startedAt:   time.Now().UTC(),
 	}
 
-	client := newHTTPClient(cfg.timeout, cfg.workers)
+	workers := cfg.workerCount()
+	client := newHTTPClient(cfg)
 	defer client.CloseIdleConnections()
 	preloadStart := time.Now()
 	var err error
@@ -195,10 +202,10 @@ func runBenchmarkWithProgress(cfg benchConfig, progress io.Writer) (benchResult,
 	result.latencies = make([]time.Duration, cfg.requests)
 
 	jobs := make(chan int)
-	workerResults := make([]benchResult, cfg.workers)
+	workerResults := make([]benchResult, workers)
 
 	var wg sync.WaitGroup
-	for w := 0; w < cfg.workers; w++ {
+	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()

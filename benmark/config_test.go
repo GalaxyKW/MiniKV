@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func TestParseConfigPreservesDefaults(t *testing.T) {
@@ -118,6 +119,29 @@ func TestParseConfigRejectsIntegerOverflowWithoutArbitraryLimits(t *testing.T) {
 				t.Errorf("rejected largest non-overflowing value %d: %v", test.limit, err)
 			}
 		})
+	}
+}
+
+func TestParseConfigBoundsActualWorkerResultAllocation(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	limit := maxInt / int(unsafe.Sizeof(benchResult{}))
+	for _, test := range []struct {
+		workers, requests int
+		valid             bool
+	}{
+		{limit, limit, true}, {limit + 1, limit + 1, false},
+		{limit + 1, limit, true}, {limit + 1, 1, true},
+		{limit, limit + 1, true}, {maxInt / 4, 1, true},
+	} {
+		args := []string{"-workers", strconv.Itoa(test.workers), "-requests", strconv.Itoa(test.requests)}
+		cfg, err := parseConfig(args, io.Discard)
+		if test.valid {
+			if err != nil || cfg.workers != test.workers || cfg.requests != test.requests {
+				t.Errorf("valid arguments %v changed or rejected: config=%#v error=%v", args, cfg, err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), "结果切片大小会溢出") || cfg != (benchConfig{}) {
+			t.Errorf("overflowing result allocation accepted: arguments=%v config=%#v error=%v", args, cfg, err)
+		}
 	}
 }
 

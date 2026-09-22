@@ -23,7 +23,7 @@ JSON 模式下，数据预置进度和诊断写入 stderr，stdout 只包含报�
 | 参数 | 默认值 | 接受范围与含义 |
 | --- | --- | --- |
 | `-url` | `http://127.0.0.1:8080/kv` | 带主机的 HTTP/HTTPS 地址；不带用户信息、query 或 fragment |
-| `-workers` | 50 | 正整数；并发 worker 数 |
+| `-workers` | 50 | 正整数；并发 worker 数上限，实际最多创建 requests 个 |
 | `-requests` | 200000 | 正整数；测量请求数，不含数据预置 |
 | `-op` | `mixed` | `put` / `get` / `delete` / `mixed`，不区分大小写 |
 | `-keyspace` | 20000 | 正整数；生成 `k0` 至 `k(keyspace-1)` |
@@ -35,7 +35,7 @@ JSON 模式下，数据预置进度和诊断写入 stderr，stdout 只包含报�
 | `-timeout` | 2s | 正的 Go duration，限制一次 HTTP 请求及响应体读取 |
 | `-format` | `text` | `text` / `json` |
 
-非法参数和多余位置参数在发送请求前报错，不再静默把负数、零或越界比例改成其他实验配置。整数溢出的容量也会被拒绝；合法的大请求数仍需按精确延迟切片的内存成本预留客户端资源。
+非法参数和多余位置参数在发送请求前报错，不再静默把负数、零或越界比例改成其他实验配置。整数溢出的容量也会被拒绝；合法的大请求数仍需按精确延迟切片的内存成本预留客户端资源。worker、每个 worker 的结果缓冲和 HTTP 连接池均按 `min(workers, requests)` 配置，避免少量请求为多余 worker 分配资源；报告的 `config.workers` 仍保留原始参数。
 
 | 退出码 | 含义 |
 | --- | --- |
