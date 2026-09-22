@@ -107,6 +107,13 @@ def positive_seconds(raw):
     return value
 
 
+def validate_arrival_config(rate, requests, maximum=sys.maxsize):
+    if type(rate) is not int or not 0 <= rate <= 1000000000:
+        raise ValueError("rate must be an integer in [0, 1000000000]")
+    if rate and (requests > maximum // 24 or requests * 1000000000 // rate > MAX_DURATION_NS):
+        raise ValueError("fixed-arrival request count or schedule duration is too large")
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, help="new artifact directory; existing paths are refused")
@@ -116,6 +123,8 @@ def parse_args(argv):
     parser.add_argument("--modes", default="throughput,reliable")
     parser.add_argument("--repeats", type=integer(1, 1000), default=3)
     parser.add_argument("--requests", type=integer(1, sys.maxsize // 8), default=20000)
+    parser.add_argument("--rate", type=integer(0, 1000000000), default=0,
+                        help="planned arrivals per second; 0 uses the closed-loop workload")
     parser.add_argument("--workers", type=integer(1, sys.maxsize // 4), default=20)
     parser.add_argument("--keyspace", type=integer(1, sys.maxsize), default=1000)
     parser.add_argument("--op", choices=("put", "get", "delete", "mixed"), default="mixed")
@@ -146,6 +155,10 @@ def parse_args(argv):
         parser.error("--modes must be a unique comma-separated subset of throughput,reliable")
     if args.write_ratio + args.delete_ratio > 100:
         parser.error("write-ratio + delete-ratio must not exceed 100")
+    try:
+        validate_arrival_config(args.rate, args.requests)
+    except ValueError as error:
+        parser.error(str(error))
     if sys.platform != "linux":
         parser.error("the engine and process sampler require Linux")
     for name in ("engine", "gateway", "bench"):
@@ -202,6 +215,9 @@ def configuration(args, directory, mode, interval):
                "-timeout", "2s", "-write-ratio", str(args.write_ratio), "-delete-ratio", str(args.delete_ratio),
                "-preload=true", "-preload-count", "0", "-seed", str(args.seed),
                "-value-size", str(args.value_size), "-format", "json"]
+    if args.rate:
+        expected["rate"] = args.rate
+        command.extend(("-rate", str(args.rate)))
     return engine, gateway, expected, command, engine_port, http_port
 
 
@@ -229,6 +245,8 @@ def fetch_stats(port, timeout=1):
         if response.status != 200:
             raise ExperimentError(f"stats HTTP {response.status}")
         validate_stats(sample["body"])
+    except Interrupted:
+        raise
     except (OSError, ValueError, http.client.HTTPException, ExperimentError) as error:
         sample["error"] = str(error)
     finally:
@@ -299,24 +317,97 @@ def stop_processes(processes, timeout):
     return result
 
 
+LATENCY_FIELDS = ("samples", "mean", "min", "p50", "p95", "p99", "p99_9", "max")
+
+
+def validate_latency(latency, samples):
+    if (any(type(latency[name]) is not int or not 0 <= latency[name] <= MAX_DURATION_NS for name in LATENCY_FIELDS)
+            or latency["samples"] != samples):
+        raise ValueError("invalid latency samples")
+    ranks = [latency[name] for name in ("min", "p50", "p95", "p99", "p99_9", "max")]
+    if ranks != sorted(ranks) or not latency["min"] <= latency["mean"] <= latency["max"]:
+        raise ValueError("inconsistent latency summary")
+    if samples == 0 and any(latency[name] for name in LATENCY_FIELDS):
+        raise ValueError("empty latency population has nonzero measurements")
+
+
+def report_degraded(report):
+    return report["load_model"] == "fixed_arrival" and bool(
+        report["outcomes"]["failures"] + report["arrivals"]["dropped_busy"] + report["arrivals"]["dropped_late"])
+
+
+def benchmark_exit_code(report):
+    return int(report_degraded(report))
+
+
+def arrival_metrics(report):
+    arrivals = report["arrivals"]
+    return {"load_model": "fixed_arrival", "rate": report["config"]["rate"],
+            "arrival_planned": arrivals["planned"], "arrival_started": arrivals["started"],
+            "dropped_busy": arrivals["dropped_busy"], "dropped_late": arrivals["dropped_late"],
+            "failures": report["outcomes"]["failures"], "offered_success_rate_pct": report["offered_success_rate_pct"],
+            "dispatch_p99_ms": report["dispatch_delay_ns"]["p99"] / 1000000 if arrivals["started"] else None,
+            "scheduled_p99_ms": report["scheduled_latency_ns"]["p99"] / 1000000 if arrivals["started"] else None}
+
+
+def fixed_arrival_settled(body):
+    values = (body["server"].get("requests_inflight"), body["gateway"]["rpc"].get("pool_in_use"),
+              body["engine"].get("async_requests_inflight", 0))
+    if any(type(value) is not int or value < 0 for value in values):
+        raise ValueError("fixed-arrival settling requires valid in-flight request counters")
+    engine = body["engine"]
+    return not any(values) and engine["durable_sequence"] == engine["applied_sequence"] and engine["wal_pending_bytes"] == 0
+
+
+def validate_fixed_completion(after, settled, report, mode):
+    initial = report["preload"]["completed_keys"]
+    writes = report["operations"]["put"] + report["operations"]["delete"]
+    minimum = initial + max(0, writes - report["outcomes"]["failures"])
+    maximum = initial + writes
+    first, last = after["engine"], settled["engine"]
+    if (not minimum <= first["applied_sequence"] <= last["applied_sequence"] <= maximum
+            or not 0 <= first["durable_sequence"] <= first["applied_sequence"]
+            or first["durable_sequence"] > last["durable_sequence"]
+            or (mode == "reliable" and first["durable_sequence"] < minimum)
+            or (mode == "reliable" and minimum == maximum and first["wal_pending_bytes"] != 0)
+            or not fixed_arrival_settled(settled)):
+        raise ValueError("fixed-arrival WAL evidence contradicts attempted writes or quiescent drain")
+
+
 def read_report(path, expected):
     try:
         report = json.loads(path.read_text(), parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+        rate = expected.get("rate", 0)
+        validate_arrival_config(rate, expected["requests"], (1 << 63) - 1)
         if (type(report["schema_version"]) is not int or report["schema_version"] != 1 or report["complete"] is not True
-                or report["load_model"] != "closed_loop" or not isinstance(report["workload_generator"], str)
+                or report["load_model"] != ("fixed_arrival" if rate else "closed_loop")
+                or not isinstance(report["workload_generator"], str)
                 or not report["workload_generator"]
-                or report["config"] != expected or report.get("error")):
+                or report["config"] != expected or report.get("error")
+                or any(type(report["config"][key]) is not type(value) for key, value in expected.items())):
             raise ValueError("report schema, completion or configuration mismatch")
+        if not rate and any(name in report for name in ("arrivals", "dispatch_delay_ns", "scheduled_latency_ns", "offered_success_rate_pct")):
+            raise ValueError("closed-loop report contains fixed-arrival measurements")
         outcomes = report["outcomes"]
         fields = ("requests", "successes", "logical_misses", "failures", "network_errors", "timeouts",
                   "transport_errors", "http_failures", "protocol_failures")
         if any(type(outcomes[name]) is not int or outcomes[name] < 0 for name in fields):
             raise ValueError("invalid outcome count")
-        if (outcomes["requests"] != expected["requests"]
+        if ((not rate and outcomes["requests"] != expected["requests"])
                 or sum(outcomes[name] for name in ("successes", "logical_misses", "failures")) != outcomes["requests"]
                 or sum(outcomes[name] for name in ("network_errors", "http_failures", "protocol_failures")) != outcomes["failures"]
                 or outcomes["timeouts"] + outcomes["transport_errors"] != outcomes["network_errors"]):
             raise ValueError("outcome counts do not reconcile")
+        if rate:
+            arrivals = report["arrivals"]
+            if (any(type(arrivals[name]) is not int or not 0 <= arrivals[name] <= expected["requests"]
+                    for name in ("planned", "started", "dropped_busy", "dropped_late"))
+                    or arrivals["planned"] != expected["requests"]
+                    or arrivals["started"] != outcomes["requests"]
+                    or arrivals["started"] + arrivals["dropped_busy"] + arrivals["dropped_late"] != arrivals["planned"]
+                    or type(arrivals["schedule_duration_ns"]) is not int
+                    or arrivals["schedule_duration_ns"] != expected["requests"] * 1000000000 // rate):
+                raise ValueError("arrival counts or schedule duration do not reconcile")
         operations = report["operations"]
         if (set(operations) != {"put", "get", "delete"}
                 or any(type(operations[name]) is not int or operations[name] < 0 for name in ("put", "get", "delete"))
@@ -332,38 +423,56 @@ def read_report(path, expected):
             if any(ratio == 0 and operations[name] for name, ratio in ratios.items()):
                 raise ValueError("operation counts contradict the configured workload")
         latency = report["latency_ns"]
-        if (latency["samples"] != outcomes["requests"] or type(report["elapsed_ns"]) is not int
-                or not 0 < report["elapsed_ns"] <= MAX_DURATION_NS
-                or any(type(latency[name]) is not int or not 0 <= latency[name] <= MAX_DURATION_NS
-                       for name in ("samples", "mean", "min", "p50", "p95", "p99", "p99_9", "max"))):
-            raise ValueError("invalid latency samples or elapsed time")
-        for field in ("qps_total", "qps_successful", "system_success_rate_pct"):
+        validate_latency(latency, outcomes["requests"])
+        if type(report["elapsed_ns"]) is not int or not 0 < report["elapsed_ns"] <= MAX_DURATION_NS:
+            raise ValueError("invalid elapsed time")
+        if rate:
+            if report["elapsed_ns"] < arrivals["schedule_duration_ns"]:
+                raise ValueError("measurement ends before the arrival schedule")
+            for name in ("dispatch_delay_ns", "scheduled_latency_ns"):
+                validate_latency(report[name], outcomes["requests"])
+            if (report["scheduled_latency_ns"]["max"] > report["elapsed_ns"]
+                    or report["scheduled_latency_ns"]["mean"] - latency["mean"] - report["dispatch_delay_ns"]["mean"] not in (0, 1)
+                    or report["scheduled_latency_ns"]["min"] < latency["min"] + report["dispatch_delay_ns"]["min"]
+                    or report["scheduled_latency_ns"]["max"] > latency["max"] + report["dispatch_delay_ns"]["max"]
+                    or any(report["scheduled_latency_ns"][name] < max(latency[name], report["dispatch_delay_ns"][name])
+                           for name in LATENCY_FIELDS if name != "samples")):
+                raise ValueError("scheduled latency contradicts dispatch or service latency")
+        rate_fields = ("qps_total", "qps_successful", "system_success_rate_pct")
+        for field in rate_fields + (("offered_success_rate_pct",) if rate else ()):
             if type(report[field]) not in (float, int) or not math.isfinite(report[field]) or report[field] < 0:
                 raise ValueError("invalid rate")
         successful = outcomes["successes"] + outcomes["logical_misses"]
         expected_rates = {"qps_total": outcomes["requests"] * 1000000000 / report["elapsed_ns"],
                           "qps_successful": successful * 1000000000 / report["elapsed_ns"],
-                          "system_success_rate_pct": successful * 100 / outcomes["requests"]}
+                          "system_success_rate_pct": successful * 100 / outcomes["requests"] if outcomes["requests"] else 0}
+        if rate:
+            expected_rates["offered_success_rate_pct"] = successful * 100 / expected["requests"]
         if any(not math.isclose(report[field], value, rel_tol=1e-9, abs_tol=1e-9)
                for field, value in expected_rates.items()):
             raise ValueError("reported rates do not match counts and elapsed time")
-        ranks = [latency[name] for name in ("min", "p50", "p95", "p99", "p99_9", "max")]
-        if ranks != sorted(ranks) or not latency["min"] <= latency["mean"] <= latency["max"]:
-            raise ValueError("inconsistent latency summary")
         preload = report["preload"]
         target = expected["keyspace"] if expected["operation"] in ("get", "mixed") else 0
         if (type(preload["target_keys"]) is not int or type(preload["completed_keys"]) is not int
                 or preload["target_keys"] != target or preload["completed_keys"] != target
                 or type(preload["elapsed_ns"]) is not int or not 0 <= preload["elapsed_ns"] <= MAX_DURATION_NS):
             raise ValueError("preload did not complete the requested initial dataset")
-        if outcomes["failures"]:
+        if outcomes["failures"] and not rate:
             raise ValueError(f"{outcomes['failures']} benchmark requests failed")
         statuses = report["http_statuses"]
         if not isinstance(statuses, dict) or any(type(value) is not int or value < 0 for value in statuses.values()):
             raise ValueError("invalid HTTP status counts")
         expected_statuses = {key: value for key, value in (("200", outcomes["successes"]),
                                                           ("404", outcomes["logical_misses"])) if value}
-        if {key: value for key, value in statuses.items() if value} != expected_statuses:
+        if rate:
+            received = sum(statuses.values())
+            if (any(re.fullmatch(r"[1-9][0-9]{2}", key) is None for key in statuses)
+                    or not outcomes["requests"] - outcomes["network_errors"] <= received <= outcomes["requests"]
+                    or statuses.get("200", 0) < outcomes["successes"]
+                    or statuses.get("404", 0) < outcomes["logical_misses"]
+                    or received - statuses.get("200", 0) < outcomes["logical_misses"] + outcomes["http_failures"]):
+                raise ValueError("HTTP status counts contradict attempted outcomes")
+        elif {key: value for key, value in statuses.items() if value} != expected_statuses:
             raise ValueError("HTTP status counts contradict successful outcomes")
         if outcomes["logical_misses"] > operations["get"] + operations["delete"]:
             raise ValueError("PUT cannot produce a logical miss")
@@ -420,6 +529,7 @@ def run_case(args, name, mode, interval):
               "started_at": utc_now(), "status": "running", "errors": []}
     write_json(directory / "result.json", result)
     processes, logs = {}, []
+    report = None
     interrupted = False
     try:
         engine_env, gateway_env, expected, command, engine_port, http_port = configuration(args, directory, mode, interval)
@@ -494,16 +604,30 @@ def run_case(args, name, mode, interval):
             if after["error"]:
                 raise ExperimentError("post-benchmark stats: " + after["error"])
             check_alive(processes)
-            if processes["bench"].returncode != 0:
-                raise ExperimentError(f"benchmark exited with {processes['bench'].returncode}")
             report = read_report(directory / "report.json", expected)
+            if processes["bench"].returncode != benchmark_exit_code(report):
+                raise ExperimentError(f"benchmark exit {processes['bench'].returncode} contradicts its report")
             # Throughput acknowledgements may leave a pending tail. Preserve
             # immediate and drained states without adding drain time to QPS.
             target = after["body"]["engine"]["applied_sequence"]
             settle_start = time.monotonic()
             settled = after
-            while (settled["body"]["engine"]["durable_sequence"] < target
-                   or settled["body"]["engine"]["wal_pending_bytes"] != 0):
+            quiet_observations = 0
+            if args.rate:
+                result["wal_drain_started_monotonic_ns"] = after["monotonic_start_ns"]
+            def drained():
+                if args.rate:
+                    return fixed_arrival_settled(settled["body"])
+                return (settled["body"]["engine"]["durable_sequence"] >= target
+                        and settled["body"]["engine"]["wal_pending_bytes"] == 0)
+
+            while True:
+                quiet_observations = quiet_observations + 1 if drained() else 0
+                # Engine and in-flight counters are sampled separately. A
+                # second quiet query observes engine state after the first
+                # query saw all admitted work finish.
+                if quiet_observations >= (2 if args.rate else 1):
+                    break
                 check_alive(processes)
                 remaining = args.settle_timeout - (time.monotonic() - settle_start)
                 if remaining <= 0:
@@ -517,10 +641,14 @@ def run_case(args, name, mode, interval):
                 if settled["error"]:
                     raise ExperimentError("WAL drain stats: " + settled["error"])
             result["wal_drain_elapsed_ns"] = int((time.monotonic() - settle_start) * 1000000000)
+            if args.rate:
+                validate_fixed_completion(after["body"], settled["body"], report, mode)
             write_json(directory / "stats-settled.json", settled["body"])
         result["observations"] = observations(directory, report, interval)
         result["metrics"] = {"qps_successful": report["qps_successful"], "p99_ns": report["latency_ns"]["p99"],
                              "failures": report["outcomes"]["failures"], "logical_misses": report["outcomes"]["logical_misses"]}
+        if args.rate:
+            result["metrics"].update(arrival_metrics(report))
     except Interrupted as error:
         interrupted = True
         result["errors"].append(str(error))
@@ -538,11 +666,13 @@ def run_case(args, name, mode, interval):
         try:
             result["processes"] = stop_processes(processes, args.shutdown_timeout)
             for role, state in result["processes"].items():
-                if state["forced"] or state["returncode"] != 0:
+                expected_exit = benchmark_exit_code(report) if role == "bench" and report is not None else 0
+                if state["forced"] or state["returncode"] != expected_exit:
                     result["errors"].append(f"{role} shutdown: exit={state['returncode']}, forced={state['forced']}")
             for log in logs:
                 log.close()
-            result.update(status="interrupted" if interrupted else ("failed" if result["errors"] else "ok"), finished_at=utc_now())
+            completed_status = "degraded" if report is not None and report_degraded(report) else "ok"
+            result.update(status="interrupted" if interrupted else ("failed" if result["errors"] else completed_status), finished_at=utc_now())
             write_json(directory / "result.json", result)
         finally:
             for sig, handler in previous.items():
@@ -578,7 +708,7 @@ def main(argv=None):
                 name = f"r{repeat + 1:02d}-{mode}-snapshot-{'on' if interval else 'off'}"
                 plan.append({"name": name, "wal_mode": mode, "snapshot_interval_ms": interval})
         manifest = {"schema_version": 1, "started_at": utc_now(), "arguments": {key: str(value) if isinstance(value, Path) else value
-                     for key, value in vars(args).items()}, "plan": plan, "runtime_environment": runtime_environment(args),
+                     for key, value in vars(args).items() if key != "rate" or value}, "plan": plan, "runtime_environment": runtime_environment(args),
                     "metadata": collect_metadata(ROOT, {name: getattr(args, name) for name in ("engine", "gateway", "bench")})}
         write_json(args.output / "manifest.json", manifest)
         write_json(args.output / "index.json", index)
@@ -609,9 +739,16 @@ def main(argv=None):
             result = run_case(args, case["name"], case["wal_mode"], case["snapshot_interval_ms"])
             results.append(result)
             write_json(args.output / "index.json", index)
-            if result["status"] == "ok":
+            if result["status"] in ("ok", "degraded"):
                 metrics = result["metrics"]
-                print(f"  QPS successful={metrics['qps_successful']:.1f}, P99={metrics['p99_ns'] / 1000000:.3f} ms", flush=True)
+                p99 = f"{metrics['p99_ns'] / 1000000:.3f} ms" if not args.rate or metrics["arrival_started"] else "unavailable"
+                print(f"  QPS successful={metrics['qps_successful']:.1f}, P99={p99}", flush=True)
+                if args.rate:
+                    print(f"  Offered={args.rate}/s, attempted={metrics['arrival_started']}/{metrics['arrival_planned']}, "
+                          f"dropped busy/late={metrics['dropped_busy']}/{metrics['dropped_late']}, failures={metrics['failures']}, "
+                          f"offered success={metrics['offered_success_rate_pct']:.3f}%", flush=True)
+                if result["status"] == "degraded":
+                    exit_code = 1
                 if case["snapshot_interval_ms"] and not result["observations"]["snapshot_activity_observed"]:
                     if args.stats_ms == 0:
                         print("  Periodic status sampling is disabled; measurement-window snapshot evidence is unavailable.", flush=True)
@@ -629,7 +766,9 @@ def main(argv=None):
         print(str(error), file=sys.stderr)
     finally:
         index.update(finished_at=utc_now(), successful_runs=sum(result["status"] == "ok" for result in results),
-                     failed_runs=sum(result["status"] != "ok" for result in results))
+                     failed_runs=sum(result["status"] not in (("ok", "degraded") if args.rate else ("ok",)) for result in results))
+        if args.rate:
+            index["degraded_runs"] = sum(result["status"] == "degraded" for result in results)
         try:
             write_json(args.output / "index.json", index)
         finally:

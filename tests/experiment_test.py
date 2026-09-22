@@ -118,6 +118,22 @@ elif role == "gateway":
                     "exchange_errors_total": 0, "exchange_duration_ns_total": 0,
                 }},
             }
+            fixed_path = fixtures / ("fixed-report-" + port + ".json")
+            if fixed_path.exists():
+                fixed = json.loads(fixed_path.read_text())
+                report = fixed["report"]
+                writes = report["operations"]["put"] + report["operations"]["delete"]
+                waiting = time.monotonic() < fixed["ready_at"]
+                committed = 0 if waiting else control.get("committed_writes", writes)
+                sequence = report["preload"]["completed_keys"] + committed
+                payload["engine"].update(applied_sequence=sequence, durable_sequence=sequence)
+                payload["server"]["requests_inflight"] = int(waiting)
+                payload["gateway"]["rpc"]["pool_in_use"] = int(waiting)
+                stale_marker = fixtures / ("stale-quiet-" + port)
+                if control.get("stale_quiet_first") and not stale_marker.exists():
+                    stale_marker.touch()
+                    payload["server"]["requests_inflight"] = 0
+                    payload["gateway"]["rpc"]["pool_in_use"] = 0
             body = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -130,7 +146,7 @@ elif role == "bench":
     parser = argparse.ArgumentParser()
     for flag, default in [("url", ""), ("workers", "1"), ("requests", "1"), ("op", "mixed"),
                           ("keyspace", "1"), ("timeout", "2s"), ("write-ratio", "20"), ("delete-ratio", "5"),
-                          ("preload-count", "0"), ("seed", "1"), ("value-size", "128"), ("format", "json")]:
+                          ("preload-count", "0"), ("seed", "1"), ("value-size", "128"), ("format", "json"), ("rate", "0")]:
         parser.add_argument("-" + flag, default=default)
     parser.add_argument("-preload", default="true")
     args = vars(parser.parse_args())
@@ -148,14 +164,15 @@ elif role == "bench":
         print("not a JSON experiment")
         sys.exit(0)
     now = datetime.now(timezone.utc).isoformat()
-    count = int(args["requests"])
+    planned, rate = int(args["requests"]), int(args["rate"])
+    count = control.get("arrival_started", planned) if rate else planned
     durations = {"ns": 1, "us": 1000, "ms": 1000000, "s": 1000000000, "m": 60000000000}
     timeout = next(int(float(args["timeout"][:-len(unit)]) * multiplier)
                    for unit, multiplier in durations.items() if args["timeout"].endswith(unit))
     preloaded = 0
     if args["preload"] == "true" and args["op"] in ("get", "mixed"):
         preloaded = min(int(args["preload_count"]) or int(args["keyspace"]), int(args["keyspace"]))
-    config = {"url": args["url"], "workers": int(args["workers"]), "requests": count,
+    config = {"url": args["url"], "workers": int(args["workers"]), "requests": planned,
               "operation": args["op"], "keyspace": int(args["keyspace"]), "timeout_ns": timeout,
               "write_ratio": int(args["write_ratio"]), "delete_ratio": int(args["delete_ratio"]),
               "preload": args["preload"] == "true", "preload_count": int(args["preload_count"]),
@@ -205,11 +222,34 @@ elif role == "bench":
             payload["latency_ns"][field] = 1 << 63
     elif behavior == "operation_mismatch":
         payload["operations"] = {"put": 0, "get": count, "delete": 0}
+    if rate:
+        config["rate"] = rate
+        failures = control.get("service_failures", 0)
+        payload["outcomes"].update(successes=count-failures, failures=failures, http_failures=failures)
+        payload["http_statuses"] = {"200": count-failures, "503": failures}
+        schedule = planned * 1000000000 // rate
+        payload["elapsed_ns"] = max(payload["elapsed_ns"], schedule)
+        if count == 0:
+            payload["latency_ns"] = dict.fromkeys(payload["latency_ns"], 0)
+        payload.update(load_model="fixed_arrival", arrivals={"planned": planned, "started": count,
+                       "dropped_busy": control.get("dropped_busy", planned-count),
+                       "dropped_late": control.get("dropped_late", 0), "schedule_duration_ns": schedule},
+                       dispatch_delay_ns={field: count if field == "samples" else (100 if count else 0)
+                                          for field in payload["latency_ns"]},
+                       scheduled_latency_ns={field: value if field == "samples" else value + (100 if count else 0)
+                                             for field, value in payload["latency_ns"].items()},
+                       offered_success_rate_pct=(count-failures)*100/planned,
+                       system_success_rate_pct=(count-failures)*100/count if count else 0,
+                       qps_total=count*1000000000/payload["elapsed_ns"],
+                       qps_successful=(count-failures)*1000000000/payload["elapsed_ns"])
+        (fixtures / ("fixed-report-" + str(urlsplit(args["url"]).port) + ".json")).write_text(json.dumps({
+            "report": payload, "ready_at": time.monotonic() + control.get("delayed_apply", 0)}))
     print(json.dumps(payload))
     if behavior == "trailing_json":
         print("{}")
     print("fixture benchmark progress", file=sys.stderr)
-    sys.exit(1 if behavior == "exit_failure" else 0)
+    lossy = rate and (count < planned or control.get("service_failures", 0))
+    sys.exit(control.get("bench_exit", 1 if behavior == "exit_failure" or lossy else 0))
 else:
     raise RuntimeError("unknown fixture role")
 '''

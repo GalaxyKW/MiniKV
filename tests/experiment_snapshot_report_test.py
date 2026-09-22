@@ -84,6 +84,66 @@ class ExperimentSnapshotReportTests(unittest.TestCase):
             summary_fixtures.save_json(run / ("stats-" + phase + ".json"), samples[-1]["body"])
         return directory, run, samples
 
+    def fixed_arrival_run(self, name="fixed-arrival", dropped_busy=0, dropped_late=0, failures=0):
+        directory, run, _ = self.new_run(name)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        manifest["arguments"]["rate"] = 100
+        summary_fixtures.save_json(directory / "manifest.json", manifest)
+        for case in manifest["plan"]:
+            current = directory / case["name"]
+            command = json.loads((current / "commands.json").read_text())
+            command["bench"]["argv"].extend(("-rate", "100"))
+            summary_fixtures.save_json(current / "commands.json", command)
+            report = json.loads((current / "report.json").read_text())
+            busy, late, failed = (dropped_busy, dropped_late, failures) if current == run else (0, 0, 0)
+            started = report["config"]["requests"] - busy - late
+            succeeded = started - failed
+            report["config"]["rate"] = 100
+            report.update(load_model="fixed_arrival", arrivals={
+                "planned": 100, "started": started, "dropped_busy": busy, "dropped_late": late,
+                "schedule_duration_ns": 1000000000})
+            report["outcomes"].update(requests=started, successes=succeeded, failures=failed,
+                                      http_failures=failed)
+            writes = min(report["operations"]["put"], started)
+            deletes = min(report["operations"]["delete"], started - writes)
+            report["operations"] = {"put": writes, "get": started - writes - deletes, "delete": deletes}
+            expected_sequence = report["preload"]["completed_keys"] + writes + deletes
+            report["http_statuses"] = {"200": succeeded} if succeeded else {}
+            if failed:
+                report["http_statuses"]["503"] = failed
+            report["latency_ns"]["samples"] = started
+            if not started:
+                report["latency_ns"] = dict.fromkeys(report["latency_ns"], 0)
+            report["dispatch_delay_ns"] = {
+                key: started if key == "samples" else (1000000 if started else 0)
+                for key in report["latency_ns"]}
+            report["scheduled_latency_ns"] = {
+                key: value if key == "samples" or not started else value + 1000000
+                for key, value in report["latency_ns"].items()}
+            report.update(qps_total=started, qps_successful=succeeded,
+                          system_success_rate_pct=100 * succeeded / started if started else 0,
+                          offered_success_rate_pct=succeeded)
+            summary_fixtures.save_json(current / "report.json", report)
+            result = json.loads((current / "result.json").read_text())
+            result["status"] = "degraded" if busy or late or failed else "ok"
+            result["processes"]["bench"]["returncode"] = 1 if result["status"] == "degraded" else 0
+            summary_fixtures.save_json(current / "result.json", result)
+            for phase in ("before", "after", "settled"):
+                path = current / ("stats-" + phase + ".json")
+                body = json.loads(path.read_text())
+                sequence = 0 if phase == "before" else expected_sequence
+                body["engine"].update(applied_sequence=sequence, durable_sequence=sequence)
+                body["server"]["requests_inflight"] = 0
+                body["gateway"]["rpc"]["pool_in_use"] = 0
+                summary_fixtures.save_json(path, body)
+            samples = [json.loads(line) for line in (current / "stats.jsonl").read_text().splitlines()]
+            for sample in samples:
+                sample["body"]["engine"].update(applied_sequence=expected_sequence,
+                                                 durable_sequence=expected_sequence)
+            self.write_samples(current, samples)
+            summary_fixtures.save_quiet_confirmation(current)
+        return directory, run
+
     def shared_window_samples(self, run):
         # There is a cheap inner idle interval, but all fields must use the
         # earliest/latest idle observations. Queries crossing the measurement
@@ -450,6 +510,56 @@ class ExperimentSnapshotReportTests(unittest.TestCase):
                 self.assertEqual(row["snapshot"]["status"], "not_evaluated")
                 self.assertIsNone(row["snapshot"]["coverage"]["window"])
                 self.assertEqual(set(row["snapshot"]["accounting"]), set(ACCOUNTING))
+
+    def test_clean_fixed_arrival_keeps_client_metrics_and_snapshot_evidence(self):
+        directory, run = self.fixed_arrival_run()
+        row = self.row(self.invoke([directory]), run)
+        self.assert_client_valid(row)
+        self.assertEqual(row["client"]["load_model"], "fixed_arrival")
+        self.assertEqual(row["client"]["rate"], 100)
+        self.assertEqual(row["client"]["arrival_planned"], 100)
+        self.assertEqual(row["client"]["arrival_started"], 100)
+        self.assertEqual(row["client"]["offered_success_rate_pct"], 100)
+        self.assertEqual(row["client"]["dispatch_p99_ms"], 1)
+        self.assertEqual(row["client"]["scheduled_p99_ms"], 4)
+        self.assertEqual(row["snapshot"]["coverage"]["status"], "sufficient")
+        self.assertEqual(row["snapshot"]["phases"]["capture"]["mean_ns"], 1000)
+
+    def test_degraded_fixed_arrival_discloses_losses_and_excludes_snapshot_comparisons(self):
+        for name, busy, late, failures in (("drops", 7, 3, 0), ("http-failures", 0, 0, 2),
+                                          ("zero-attempts", 40, 60, 0)):
+            with self.subTest(name=name):
+                directory, run = self.fixed_arrival_run(name, busy, late, failures)
+                row = self.row(self.invoke([directory], expected=1), run)
+                client, snapshot = row["client"], row["snapshot"]
+                started = 100 - busy - late
+                self.assertEqual(client["status"], "degraded")
+                self.assertEqual(client["arrival_planned"], 100)
+                self.assertEqual(client["arrival_started"], started)
+                self.assertEqual(client["dropped_busy"], busy)
+                self.assertEqual(client["dropped_late"], late)
+                self.assertEqual(client["failures"], failures)
+                self.assertEqual(client["offered_success_rate_pct"], started - failures)
+                self.assertEqual(client["qps_successful"], started - failures)
+                self.assertEqual(client["p99_ms"], 3 if started else None)
+                self.assertEqual(client["scheduled_p99_ms"], 4 if started else None)
+                self.assertEqual(snapshot["status"], "not_evaluated")
+                self.assertIsNone(snapshot["coverage"]["window"])
+                self.assertTrue(any("excluded from clean snapshot comparisons" in reason
+                                    for reason in snapshot["coverage"]["reasons"]))
+                self.assertTrue(all(value["mean_ns"] is None for value in snapshot["phases"].values()))
+                text = self.invoke([directory], expected=1, format="text")
+                for value in ("client=degraded", "rate=100 req/s", "planned=100", "started=" + str(started),
+                              "dropped_busy=" + str(busy), "dropped_late=" + str(late),
+                              "failures=" + str(failures), "offered_success_rate=", "scheduled P99=",
+                              "excluded from clean snapshot comparisons"):
+                    self.assertIn(value, text.stdout)
+                self.assertIn("degraded", text.stderr)
+
+    def test_closed_loop_client_shape_stays_unchanged(self):
+        directory, run, _ = self.new_run()
+        client = self.row(self.invoke([directory]), run)["client"]
+        self.assertEqual(set(client), {"status", "qps_successful", "p99_ms", "errors", "warnings"})
 
     def test_invalid_client_report_cannot_be_rehabilitated_by_good_snapshot_samples(self):
         directory, run, _ = self.new_run()

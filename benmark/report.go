@@ -16,6 +16,7 @@ type reportConfig struct {
 	URL          string `json:"url"`
 	Workers      int    `json:"workers"`
 	Requests     int    `json:"requests"`
+	Rate         int    `json:"rate,omitempty"`
 	Operation    string `json:"operation"`
 	Keyspace     int    `json:"keyspace"`
 	TimeoutNS    int64  `json:"timeout_ns"`
@@ -65,27 +66,39 @@ type latencyReport struct {
 	Max     int64 `json:"max"`
 }
 
+type arrivalReport struct {
+	Planned            int   `json:"planned"`
+	Started            int   `json:"started"`
+	DroppedBusy        int   `json:"dropped_busy"`
+	DroppedLate        int   `json:"dropped_late"`
+	ScheduleDurationNS int64 `json:"schedule_duration_ns"`
+}
+
 // Schema 1 records client-side configuration and measurements. Engine and
 // gateway build/configuration must be recorded separately by the experiment.
 type benchmarkReport struct {
-	SchemaVersion        int              `json:"schema_version"`
-	StartedAt            string           `json:"started_at"`
-	MeasurementStartedAt string           `json:"measurement_started_at,omitempty"`
-	Complete             bool             `json:"complete"`
-	Error                string           `json:"error,omitempty"`
-	LoadModel            string           `json:"load_model"`
-	WorkloadGenerator    string           `json:"workload_generator"`
-	Config               reportConfig     `json:"config"`
-	ClientBuild          clientBuild      `json:"client_build"`
-	Preload              preloadReport    `json:"preload"`
-	ElapsedNS            int64            `json:"elapsed_ns"`
-	Outcomes             outcomeReport    `json:"outcomes"`
-	Operations           map[string]int64 `json:"operations"`
-	HTTPStatus           map[int]int64    `json:"http_statuses"`
-	LatencyNS            latencyReport    `json:"latency_ns"`
-	QPSTotal             float64          `json:"qps_total"`
-	QPSSuccessful        float64          `json:"qps_successful"`
-	SystemSuccessRatePct float64          `json:"system_success_rate_pct"`
+	SchemaVersion         int              `json:"schema_version"`
+	StartedAt             string           `json:"started_at"`
+	MeasurementStartedAt  string           `json:"measurement_started_at,omitempty"`
+	Complete              bool             `json:"complete"`
+	Error                 string           `json:"error,omitempty"`
+	LoadModel             string           `json:"load_model"`
+	WorkloadGenerator     string           `json:"workload_generator"`
+	Config                reportConfig     `json:"config"`
+	ClientBuild           clientBuild      `json:"client_build"`
+	Preload               preloadReport    `json:"preload"`
+	ElapsedNS             int64            `json:"elapsed_ns"`
+	Outcomes              outcomeReport    `json:"outcomes"`
+	Operations            map[string]int64 `json:"operations"`
+	HTTPStatus            map[int]int64    `json:"http_statuses"`
+	LatencyNS             latencyReport    `json:"latency_ns"`
+	QPSTotal              float64          `json:"qps_total"`
+	QPSSuccessful         float64          `json:"qps_successful"`
+	SystemSuccessRatePct  float64          `json:"system_success_rate_pct"`
+	Arrivals              *arrivalReport   `json:"arrivals,omitempty"`
+	DispatchDelayNS       *latencyReport   `json:"dispatch_delay_ns,omitempty"`
+	ScheduledLatencyNS    *latencyReport   `json:"scheduled_latency_ns,omitempty"`
+	OfferedSuccessRatePct *float64         `json:"offered_success_rate_pct,omitempty"`
 }
 
 func currentBuild() clientBuild {
@@ -152,14 +165,27 @@ func avgDuration(all []time.Duration) time.Duration {
 	return time.Duration(mean)
 }
 
+func summarizeLatency(latencies []time.Duration) latencyReport {
+	// Workers have finished; reuse each sample allocation for exact sorting.
+	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+	report := latencyReport{
+		Samples: len(latencies), Mean: int64(avgDuration(latencies)),
+		P50: int64(percentile(latencies, 50, 100)), P95: int64(percentile(latencies, 95, 100)),
+		P99: int64(percentile(latencies, 99, 100)), P999: int64(percentile(latencies, 999, 1000)),
+	}
+	if len(latencies) > 0 {
+		report.Min = int64(latencies[0])
+		report.Max = int64(latencies[len(latencies)-1])
+	}
+	return report
+}
+
 func makeReport(cfg benchConfig, result benchResult, runErr error) benchmarkReport {
-	// Workers have finished; reuse the sole latency allocation for exact sorting.
-	sort.Slice(result.latencies, func(i, j int) bool { return result.latencies[i] < result.latencies[j] })
 	report := benchmarkReport{
 		SchemaVersion: 1, StartedAt: result.startedAt.Format(time.RFC3339Nano),
 		Complete: runErr == nil, LoadModel: "closed_loop", WorkloadGenerator: workloadVersion,
 		Config: reportConfig{
-			URL: cfg.baseURL, Workers: cfg.workers, Requests: cfg.requests, Operation: cfg.op,
+			URL: cfg.baseURL, Workers: cfg.workers, Requests: cfg.requests, Rate: cfg.rate, Operation: cfg.op,
 			Keyspace: cfg.keyspace, TimeoutNS: int64(cfg.timeout), WriteRatio: cfg.writeRatio,
 			DeleteRatio: cfg.deleteRatio, Preload: cfg.preload, PreloadCount: cfg.preloadCount,
 			Seed: cfg.seed, ValueSize: cfg.valueSize,
@@ -173,11 +199,7 @@ func makeReport(cfg benchConfig, result benchResult, runErr error) benchmarkRepo
 			TransportErrors: result.errors - result.timeouts, HTTPFailures: result.httpFailures, ProtocolFailures: result.protocolFailures,
 		},
 		Operations: result.operations, HTTPStatus: result.statusCount,
-		LatencyNS: latencyReport{
-			Samples: len(result.latencies), Mean: int64(avgDuration(result.latencies)),
-			P50: int64(percentile(result.latencies, 50, 100)), P95: int64(percentile(result.latencies, 95, 100)),
-			P99: int64(percentile(result.latencies, 99, 100)), P999: int64(percentile(result.latencies, 999, 1000)),
-		},
+		LatencyNS: summarizeLatency(result.latencies),
 	}
 	if !result.measurementStartedAt.IsZero() {
 		report.MeasurementStartedAt = result.measurementStartedAt.Format(time.RFC3339Nano)
@@ -185,16 +207,26 @@ func makeReport(cfg benchConfig, result benchResult, runErr error) benchmarkRepo
 	if runErr != nil {
 		report.Error = "preload_failed"
 	}
-	if len(result.latencies) > 0 {
-		report.LatencyNS.Min = int64(result.latencies[0])
-		report.LatencyNS.Max = int64(result.latencies[len(result.latencies)-1])
-	}
 	if result.elapsed > 0 {
 		report.QPSTotal = float64(result.total) / result.elapsed.Seconds()
 		report.QPSSuccessful = float64(result.successes+result.logicalMisses) / result.elapsed.Seconds()
 	}
 	if result.total > 0 {
 		report.SystemSuccessRatePct = float64(result.successes+result.logicalMisses) * 100 / float64(result.total)
+	}
+	if cfg.rate > 0 {
+		report.LoadModel = "fixed_arrival"
+		report.Arrivals = &arrivalReport{
+			Planned: cfg.requests, Started: result.total, DroppedBusy: result.droppedBusy,
+			DroppedLate: result.droppedLate, ScheduleDurationNS: int64(arrivalOffset(cfg.requests, cfg.rate)),
+		}
+		dispatch, scheduled := summarizeLatency(result.dispatchDelays), summarizeLatency(result.scheduledLatencies)
+		report.DispatchDelayNS, report.ScheduledLatencyNS = &dispatch, &scheduled
+		offeredSuccessRate := float64(0)
+		if cfg.requests > 0 {
+			offeredSuccessRate = float64(result.successes+result.logicalMisses) * 100 / float64(cfg.requests)
+		}
+		report.OfferedSuccessRatePct = &offeredSuccessRate
 	}
 	return report
 }
@@ -212,6 +244,15 @@ func writeReport(output io.Writer, cfg benchConfig, result benchResult, runErr e
 	fmt.Fprintf(w, "操作类型        : %s\n", cfg.op)
 	fmt.Fprintf(w, "并发 Worker     : %d\n", cfg.workers)
 	fmt.Fprintf(w, "总请求数        : %d\n", result.total)
+	if report.Arrivals != nil {
+		fmt.Fprintf(w, "负载模型        : %s\n", report.LoadModel)
+		fmt.Fprintf(w, "目标到达率      : %d req/s\n", cfg.rate)
+		fmt.Fprintf(w, "计划到达数      : %d\n", report.Arrivals.Planned)
+		fmt.Fprintf(w, "实际发起数      : %d\n", report.Arrivals.Started)
+		fmt.Fprintf(w, "Worker 忙丢弃   : %d\n", report.Arrivals.DroppedBusy)
+		fmt.Fprintf(w, "调度过期丢弃    : %d\n", report.Arrivals.DroppedLate)
+		fmt.Fprintf(w, "计划到达时长    : %v\n", time.Duration(report.Arrivals.ScheduleDurationNS))
+	}
 	fmt.Fprintf(w, "Key 空间        : %d\n", cfg.keyspace)
 	fmt.Fprintf(w, "Value 字节数    : %d\n", cfg.valueSize)
 	fmt.Fprintf(w, "随机种子        : %d\n", cfg.seed)
@@ -221,11 +262,17 @@ func writeReport(output io.Writer, cfg benchConfig, result benchResult, runErr e
 	fmt.Fprintf(w, "总耗时          : %v\n", result.elapsed)
 	fmt.Fprintf(w, "QPS             : %.2f\n", report.QPSTotal)
 	fmt.Fprintf(w, "成功吞吐量      : %.2f req/s（含正常未命中）\n", report.QPSSuccessful)
-	fmt.Fprintf(w, "平均延迟        : %v\n", time.Duration(report.LatencyNS.Mean))
-	fmt.Fprintf(w, "P50 延迟        : %v\n", time.Duration(report.LatencyNS.P50))
-	fmt.Fprintf(w, "P95 延迟        : %v\n", time.Duration(report.LatencyNS.P95))
-	fmt.Fprintf(w, "P99 延迟        : %v\n", time.Duration(report.LatencyNS.P99))
-	fmt.Fprintf(w, "P99.9 延迟      : %v\n", time.Duration(report.LatencyNS.P999))
+	if report.Arrivals != nil {
+		writeArrivalLatency(w, "服务延迟", report.LatencyNS)
+		writeArrivalLatency(w, "调度延迟", *report.DispatchDelayNS)
+		writeArrivalLatency(w, "计划到完成延迟", *report.ScheduledLatencyNS)
+	} else {
+		fmt.Fprintf(w, "平均延迟        : %v\n", time.Duration(report.LatencyNS.Mean))
+		fmt.Fprintf(w, "P50 延迟        : %v\n", time.Duration(report.LatencyNS.P50))
+		fmt.Fprintf(w, "P95 延迟        : %v\n", time.Duration(report.LatencyNS.P95))
+		fmt.Fprintf(w, "P99 延迟        : %v\n", time.Duration(report.LatencyNS.P99))
+		fmt.Fprintf(w, "P99.9 延迟      : %v\n", time.Duration(report.LatencyNS.P999))
+	}
 	fmt.Fprintf(w, "成功请求        : %d\n", result.successes)
 	fmt.Fprintf(w, "逻辑未命中      : %d\n", result.logicalMisses)
 	fmt.Fprintf(w, "失败请求        : %d\n", result.failures)
@@ -233,7 +280,12 @@ func writeReport(output io.Writer, cfg benchConfig, result benchResult, runErr e
 	fmt.Fprintf(w, "客户端超时      : %d\n", result.timeouts)
 	fmt.Fprintf(w, "HTTP 状态失败   : %d\n", result.httpFailures)
 	fmt.Fprintf(w, "响应格式失败    : %d\n", result.protocolFailures)
-	fmt.Fprintf(w, "系统成功率      : %.2f%%\n", report.SystemSuccessRatePct)
+	if report.Arrivals != nil {
+		fmt.Fprintf(w, "已发请求成功率  : %.2f%%（分母：%d 个已发请求）\n", report.SystemSuccessRatePct, report.Arrivals.Started)
+		fmt.Fprintf(w, "计划到达成功率  : %.2f%%（分母：%d 个计划到达）\n", *report.OfferedSuccessRatePct, report.Arrivals.Planned)
+	} else {
+		fmt.Fprintf(w, "系统成功率      : %.2f%%\n", report.SystemSuccessRatePct)
+	}
 	if runErr != nil {
 		fmt.Fprintln(w, "测量未开始：数据预置失败。")
 	}
@@ -248,4 +300,10 @@ func writeReport(output io.Writer, cfg benchConfig, result benchResult, runErr e
 	}
 	fmt.Fprintln(w, "==============================")
 	return w.Flush()
+}
+
+func writeArrivalLatency(w io.Writer, name string, latency latencyReport) {
+	fmt.Fprintf(w, "%s: 样本=%d 平均=%v 最小=%v P50=%v P95=%v P99=%v P99.9=%v 最大=%v\n", name,
+		latency.Samples, time.Duration(latency.Mean), time.Duration(latency.Min), time.Duration(latency.P50),
+		time.Duration(latency.P95), time.Duration(latency.P99), time.Duration(latency.P999), time.Duration(latency.Max))
 }

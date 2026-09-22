@@ -415,3 +415,115 @@ func TestRunReportsRedirectsAndResponseSizeBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestClosedLoopReportOmitsFixedArrivalFields(t *testing.T) {
+	var output bytes.Buffer
+	if err := writeReport(&output, benchConfig{format: "json"}, benchResult{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	report := decodeOnlyReport(t, output.Bytes())
+	if report.LoadModel != "closed_loop" || report.Config.Rate != 0 || report.Arrivals != nil ||
+		report.DispatchDelayNS != nil || report.ScheduledLatencyNS != nil || report.OfferedSuccessRatePct != nil {
+		t.Fatalf("closed-loop report gained fixed-arrival measurements: %#v", report)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(output.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"arrivals", "dispatch_delay_ns", "scheduled_latency_ns", "offered_success_rate_pct"} {
+		if _, ok := body[field]; ok {
+			t.Errorf("closed-loop JSON includes %s", field)
+		}
+	}
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(body["config"], &config); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := config["rate"]; ok {
+		t.Error("closed-loop config includes rate=0 instead of preserving the existing JSON shape")
+	}
+}
+
+func TestFixedArrivalReportPreservesAttemptAndOfferedDenominators(t *testing.T) {
+	cfg := benchConfig{rate: 3, requests: 6, format: "json"}
+	result := benchResult{
+		total: 3, successes: 1, logicalMisses: 1, failures: 1, httpFailures: 1,
+		droppedBusy: 2, droppedLate: 1, elapsed: 3 * time.Second,
+		latencies: []time.Duration{30, 10, 20}, dispatchDelays: []time.Duration{1, 4, 2},
+		scheduledLatencies: []time.Duration{31, 14, 22},
+		operations:         map[string]int64{"put": 1, "get": 2, "delete": 0},
+		statusCount:        map[int]int64{200: 1, 404: 1, 503: 1},
+	}
+	var output bytes.Buffer
+	if err := writeReport(&output, cfg, result, nil); err != nil {
+		t.Fatal(err)
+	}
+	report := decodeOnlyReport(t, output.Bytes())
+	wantArrivals := arrivalReport{Planned: 6, Started: 3, DroppedBusy: 2, DroppedLate: 1, ScheduleDurationNS: int64(2 * time.Second)}
+	if report.LoadModel != "fixed_arrival" || report.Config.Rate != 3 || !report.Complete || report.Error != "" ||
+		report.Arrivals == nil || *report.Arrivals != wantArrivals {
+		t.Fatalf("fixed-arrival identity/counts incorrect: %#v", report)
+	}
+	if report.Outcomes != (outcomeReport{Requests: 3, Successes: 1, LogicalMisses: 1, Failures: 1, HTTPFailures: 1}) ||
+		!reflect.DeepEqual(report.Operations, result.operations) || !reflect.DeepEqual(report.HTTPStatus, result.statusCount) {
+		t.Errorf("drops changed attempt outcomes: %#v", report)
+	}
+	wantService := latencyReport{Samples: 3, Mean: 20, Min: 10, P50: 20, P95: 30, P99: 30, P999: 30, Max: 30}
+	wantDispatch := latencyReport{Samples: 3, Mean: 2, Min: 1, P50: 2, P95: 4, P99: 4, P999: 4, Max: 4}
+	wantScheduled := latencyReport{Samples: 3, Mean: 22, Min: 14, P50: 22, P95: 31, P99: 31, P999: 31, Max: 31}
+	if report.LatencyNS != wantService || report.DispatchDelayNS == nil || *report.DispatchDelayNS != wantDispatch ||
+		report.ScheduledLatencyNS == nil || *report.ScheduledLatencyNS != wantScheduled {
+		t.Errorf("attempt latency samples were dropped, conflated or padded: %#v", report)
+	}
+	if report.QPSTotal != 1 || math.Abs(report.QPSSuccessful-2.0/3) > 1e-12 ||
+		math.Abs(report.SystemSuccessRatePct-200.0/3) > 1e-12 || report.OfferedSuccessRatePct == nil ||
+		math.Abs(*report.OfferedSuccessRatePct-100.0/3) > 1e-12 {
+		t.Errorf("attempt/arrival denominators incorrect: %#v", report)
+	}
+	cfg.format = "text"
+	output.Reset()
+	if err := writeReport(&output, cfg, result, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"fixed_arrival", "计划到达数      : 6", "实际发起数      : 3", "Worker 忙丢弃   : 2", "调度过期丢弃    : 1",
+		"服务延迟: 样本=3", "调度延迟: 样本=3", "计划到完成延迟: 样本=3", "66.67%（分母：3 个已发请求）", "33.33%（分母：6 个计划到达）"} {
+		if !strings.Contains(output.String(), fragment) {
+			t.Errorf("text report omitted %q: %s", fragment, output.String())
+		}
+	}
+}
+
+func TestFixedArrivalReportZeroAttemptsAndPreloadFailure(t *testing.T) {
+	for _, preloadFailed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(preloadFailed), func(t *testing.T) {
+			cfg := benchConfig{rate: 7, requests: 10, format: "json"}
+			result := benchResult{}
+			var runErr error
+			if preloadFailed {
+				runErr = errors.New("preload unavailable")
+			} else {
+				result.droppedLate = cfg.requests
+				result.elapsed = 2 * time.Second
+				result.measurementStartedAt = time.Now().UTC()
+			}
+			var output bytes.Buffer
+			if err := writeReport(&output, cfg, result, runErr); err != nil {
+				t.Fatal(err)
+			}
+			report := decodeOnlyReport(t, output.Bytes())
+			if report.Complete == preloadFailed || (report.Error == "preload_failed") != preloadFailed ||
+				(report.MeasurementStartedAt == "") != preloadFailed || report.Outcomes != (outcomeReport{}) {
+				t.Errorf("zero-attempt completion was misreported: %#v", report)
+			}
+			if report.Arrivals == nil || report.Arrivals.Planned != 10 || report.Arrivals.Started != 0 ||
+				report.Arrivals.DroppedBusy != 0 || report.Arrivals.DroppedLate != result.droppedLate || report.Arrivals.ScheduleDurationNS != 1428571428 {
+				t.Errorf("zero-attempt arrival accounting incorrect: %#v", report.Arrivals)
+			}
+			if report.LatencyNS != (latencyReport{}) || report.DispatchDelayNS == nil || *report.DispatchDelayNS != (latencyReport{}) ||
+				report.ScheduledLatencyNS == nil || *report.ScheduledLatencyNS != (latencyReport{}) || report.QPSTotal != 0 || report.QPSSuccessful != 0 ||
+				report.SystemSuccessRatePct != 0 || report.OfferedSuccessRatePct == nil || *report.OfferedSuccessRatePct != 0 {
+				t.Errorf("zero attempts acquired samples or nonzero/missing rates: %#v", report)
+			}
+		})
+	}
+}

@@ -34,6 +34,10 @@ CORE_COUNTERS = (
 MONOTONIC_COUNTERS = (
     "applied_sequence", "durable_sequence", "snapshot_successes_total", "snapshot_failures_total",
 )
+FIXED_ARRIVAL_CLIENT_FIELDS = (
+    "load_model", "rate", "arrival_planned", "arrival_started", "dropped_busy", "dropped_late",
+    "failures", "offered_success_rate_pct", "dispatch_p99_ms", "scheduled_p99_ms",
+)
 
 
 def metric(kind="counter", phase=False):
@@ -237,6 +241,8 @@ def analyze_stage(directory, thresholds):
     for case in manifest["plan"]:
         row = rows[case["name"]]
         client = {field: row[field] for field in ("status", "qps_successful", "p99_ms", "errors", "warnings")}
+        if row.get("load_model") == "fixed_arrival":
+            client.update({field: row[field] for field in FIXED_ARRIVAL_CLIENT_FIELDS if field in row})
         snapshot = empty_snapshot()
         if client["status"] == "valid":
             try:
@@ -246,6 +252,10 @@ def analyze_stage(directory, thresholds):
             except Exception as error:
                 snapshot["status"] = "invalid"
                 snapshot["errors"].append(str(error))
+        elif client["status"] == "degraded":
+            snapshot["coverage"]["reasons"].append(
+                "Validated fixed-arrival run has dropped arrivals or service failures; "
+                "excluded from clean snapshot comparisons.")
         else:
             snapshot["coverage"]["reasons"].append("Client artifacts did not pass experiment validation.")
         result["runs"].append({**case, "client": client, "snapshot": snapshot})
@@ -273,6 +283,11 @@ def write_text(report, output):
             output.write("  {}: client={} QPS={} P99={} ms; snapshot={} coverage={} completed={}\n".format(
                 row["name"], client["status"], client["qps_successful"], client["p99_ms"], snapshot["status"],
                 coverage["status"], coverage["completed"]))
+            if client.get("load_model") == "fixed_arrival":
+                output.write("    fixed_arrival: rate={} req/s planned={} started={} dropped_busy={} "
+                             "dropped_late={} failures={} offered_success_rate={}%; "
+                             "dispatch P99={} ms scheduled P99={} ms\n".format(
+                                 *(client.get(field) for field in FIXED_ARRIVAL_CLIENT_FIELDS[1:])))
             output.write("    samples: internal={} idle={} failed_queries={}\n".format(
                 coverage["internal_samples"], coverage["idle_samples"], coverage["failed_queries"]))
             window = coverage["window"]
@@ -348,7 +363,7 @@ def main(argv=None):
                                       or row["snapshot"]["status"] == "invalid" or row["snapshot"]["errors"]
                                       for row in stage["runs"]) for stage in report["experiments"])
     if failed:
-        print("Some artifacts are failed, missing, unfinished, or invalid; see the report.", file=sys.stderr)
+        print("Some artifacts are degraded, failed, missing, unfinished, or invalid; see the report.", file=sys.stderr)
         return 1
     return 0
 

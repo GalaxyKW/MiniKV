@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -67,6 +68,7 @@ func TestParseConfigRejectsInvalidParameters(t *testing.T) {
 		{"-format", "yaml"}, {"-format", "JSON"}, {"-requests", "abc"}, {"-timeout", "soon"},
 		{"-preload=maybe"}, {"-unknown"}, {"-workers"}, {"extra"}, {"--", "extra"},
 		{"-preload", "false"}, {"-workers", "2", "extra", "-requests", "3"},
+		{"-rate", "-1"}, {"-rate", "1000000001"}, {"-rate", "0.5"}, {"-rate", "fast"},
 	}
 	for _, args := range tests {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -189,7 +191,7 @@ func TestParseConfigDoesNotMakeRequests(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	for _, invalid := range [][]string{{"-workers", "0"}, {"-timeout", "0"}, {"-preload-count", "-1"}, {"-format", "bad"}, {"extra"}} {
+	for _, invalid := range [][]string{{"-workers", "0"}, {"-timeout", "0"}, {"-preload-count", "-1"}, {"-format", "bad"}, {"-rate", "-1"}, {"-rate", "1000000001"}, {"extra"}} {
 		args := append([]string{"-url", server.URL + "/kv"}, invalid...)
 		if _, err := parseConfig(args, io.Discard); err == nil {
 			t.Errorf("expected invalid config: %v", args)
@@ -200,5 +202,70 @@ func TestParseConfigDoesNotMakeRequests(t *testing.T) {
 	}
 	if got := requests.Load(); got != 0 {
 		t.Fatalf("configuration parsing sent %d HTTP requests", got)
+	}
+}
+
+func TestParseConfigFixedArrivalRateAndSampleBoundaries(t *testing.T) {
+	for _, rate := range []int{0, 1, 3, 1000000000} {
+		cfg, err := parseConfig([]string{"-rate", strconv.Itoa(rate)}, io.Discard)
+		if err != nil || cfg.rate != rate || cfg.requests != 200000 {
+			t.Errorf("rate=%d produced config=%#v error=%v", rate, cfg, err)
+		}
+	}
+	maxInt := int(^uint(0) >> 1)
+	for _, requests := range []int{maxInt / 24, maxInt/24 + 1} {
+		cfg, err := parseConfig([]string{"-rate", "1000000000", "-requests", strconv.Itoa(requests)}, io.Discard)
+		if requests == maxInt/24 {
+			if err != nil || cfg.requests != requests {
+				t.Errorf("largest fixed-arrival sample capacity rejected: config=%#v error=%v", cfg, err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), "延迟切片大小会溢出") || cfg != (benchConfig{}) {
+			t.Errorf("overflowing fixed-arrival capacity accepted: config=%#v error=%v", cfg, err)
+		}
+	}
+}
+
+func TestParseConfigRejectsArrivalDurationOverflow(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("32-bit request counts cannot overflow a duration at supported rates")
+	}
+	const maxDuration = int64(1<<63 - 1)
+	seconds := maxDuration / int64(time.Second)
+	for _, test := range []struct {
+		requests int64
+		rate     int
+		valid    bool
+	}{
+		{seconds, 1, true}, {seconds + 1, 1, false},
+		// The final 6/7 second exceeds the duration's remaining fraction;
+		// checking only whole seconds would silently accept this overflow.
+		{seconds*7 + 5, 7, true}, {seconds*7 + 6, 7, false},
+	} {
+		cfg, err := parseConfig([]string{"-rate", strconv.Itoa(test.rate), "-requests", strconv.FormatInt(test.requests, 10)}, io.Discard)
+		if test.valid {
+			if err != nil || cfg.requests != int(test.requests) {
+				t.Errorf("valid arrival horizon rejected: %#v: config=%#v error=%v", test, cfg, err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), "计划时长") || cfg != (benchConfig{}) {
+			t.Errorf("overflowing arrival horizon accepted: %#v: config=%#v error=%v", test, cfg, err)
+		}
+	}
+}
+
+func TestArrivalScheduleValidationMatchesExactArithmetic(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	for _, requests := range []int{0, -1, 1, 2, 7, maxInt / 24, maxInt / 8, maxInt} {
+		for _, rate := range []int{-1, 0, 1, 3, 7, 999999999, 1000000000, 1000000001} {
+			want := requests > 0 && rate > 0 && rate <= 1000000000
+			if want {
+				var horizon big.Int
+				horizon.Mul(big.NewInt(int64(requests)), big.NewInt(int64(time.Second)))
+				horizon.Quo(&horizon, big.NewInt(int64(rate)))
+				want = horizon.IsInt64()
+			}
+			if got := validArrivalSchedule(requests, rate); got != want {
+				t.Errorf("validArrivalSchedule(%d, %d)=%v, exact arithmetic says %v", requests, rate, got, want)
+			}
+		}
 	}
 }

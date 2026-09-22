@@ -18,13 +18,26 @@ python3 -m json.tool /tmp/minikv-bench-result.json
 
 JSON 模式下，数据预置进度和诊断写入 stderr，stdout 只包含报告。每轮应使用不同的输出文件名；终端重定向会覆盖同名文件。报告记录的是**压测客户端**的配置和构建信息。[自动化实验脚本](benchmark-experiments.md)可同时保留服务器配置、二进制摘要、当前源码状态、可见主机信息和资源采样；文件系统、设备与其他主机负载仍需补充说明。
 
+加入 `-rate` 可使用固定到达率。例如下面计划以 1,000 req/s 到达 20,000 个请求，计划窗口为 20 秒；实际发起数量与丢弃数量以报告为准：
+
+```sh
+./bin/minikv-bench \
+  -url http://127.0.0.1:8080/kv \
+  -workers 50 -requests 20000 -rate 1000 -op mixed \
+  -keyspace 1000 -preload-count 1000 \
+  -write-ratio 20 -delete-ratio 5 \
+  -value-size 128 -seed 1 -timeout 2s \
+  -format json > /tmp/minikv-fixed-arrival-result.json
+```
+
 ## 参数与失败退出
 
 | 参数 | 默认值 | 接受范围与含义 |
 | --- | --- | --- |
 | `-url` | `http://127.0.0.1:8080/kv` | 带主机的 HTTP/HTTPS 地址；不带用户信息、query 或 fragment |
 | `-workers` | 50 | 正整数；并发 worker 数上限，实际最多创建 requests 个 |
-| `-requests` | 200000 | 正整数；测量请求数，不含数据预置 |
+| `-requests` | 200000 | 正整数；闭环模式为测量请求数，固定到达模式为计划到达数，不含数据预置 |
+| `-rate` | 0 | 0 保持闭环模式；1–1000000000 为固定到达率，单位 req/s，只接受整数 |
 | `-op` | `mixed` | `put` / `get` / `delete` / `mixed`，不区分大小写 |
 | `-keyspace` | 20000 | 正整数；生成 `k0` 至 `k(keyspace-1)` |
 | `-write-ratio` / `-delete-ratio` | 20 / 5 | 各为 0–100，之和不超过 100；mixed 剩余比例为 GET |
@@ -35,15 +48,23 @@ JSON 模式下，数据预置进度和诊断写入 stderr，stdout 只包含报�
 | `-timeout` | 2s | 正的 Go duration，限制一次 HTTP 请求及响应体读取 |
 | `-format` | `text` | `text` / `json` |
 
-非法参数和多余位置参数在发送请求前报错，不再静默把负数、零或越界比例改成其他实验配置。整数溢出的容量也会被拒绝；合法的大请求数仍需按精确延迟切片的内存成本预留客户端资源。worker、每个 worker 的结果缓冲和 HTTP 连接池均按 `min(workers, requests)` 配置，避免少量请求为多余 worker 分配资源；报告的 `config.workers` 仍保留原始参数。
+非法参数和多余位置参数在发送请求前报错，不再静默把负数、零或越界比例改成其他实验配置。整数溢出的容量、超过 `time.Duration` 范围的固定到达计划时长也会被拒绝。精确延迟数组的空间为 O(requests)：闭环模式每个请求预留 8 字节，固定到达模式为三组数组，每个计划到达预留 24 字节，即使部分到达最终被丢弃也会预留。配置分别限制 `requests <= MaxInt/8` 与 `requests <= MaxInt/24`；这只防止大小计算溢出，合法的大请求数仍需预留实际内存。worker、每个 worker 的结果缓冲和 HTTP 连接池均按 `min(workers, requests)` 配置，避免少量请求为多余 worker 分配资源；报告的 `config.workers` 仍保留原始参数。
 
 | 退出码 | 含义 |
 | --- | --- |
-| 0 | 请求全部完成，只有成功和正常未命中；`-help` 也退出 0，但不执行实验或输出报告 |
-| 1 | 数据预置失败、测量存在系统失败，或报告写出失败 |
+| 0 | 全部计划请求均发起并完成，只有成功和正常未命中；`-help` 也退出 0，但不执行实验或输出报告 |
+| 1 | 数据预置失败、测量存在系统失败、固定到达被丢弃，或报告写出失败 |
 | 2 | 参数解析或配置校验失败，不输出实验报告 |
 
-数据预置失败时仍输出 JSON 报告：`complete=false`、`error="preload_failed"`，测量请求数与延迟样本数为 0；`preload.completed_keys` 保留已经成功写入的 key 数。测量中有失败请求时，`complete=true` 仅表示所有测量请求均已结束，是否成功需读取 `outcomes.failures` 或退出码。
+数据预置失败时仍输出 JSON 报告：`complete=false`、`error="preload_failed"`，测量请求数与延迟样本数为 0；`preload.completed_keys` 保留已经成功写入的 key 数。固定到达报告仍保留计划到达数与计划窗口时长，实际发起与丢弃计数均为 0。测量中有失败请求或丢弃时，`complete=true` 表示计划已经处理完、所有已发起请求均已结束；是否满足计划需读取 `outcomes.failures`、`arrivals` 或退出码。
+
+## 固定到达与有界发起
+
+默认 `-rate 0` 为闭环模型，每个 worker 等上一个请求结束后再发送下一个。正整数 `-rate R` 使用 `fixed_arrival` 模型：测量开始时刻为 `t0`，编号 `i=0..N-1` 的计划到达时刻为 `t0 + floor(i × 1000000000 / R)` 纳秒，`N` 为 `requests`。计算使用整数商与余数，不通过反复累加截断后的间隔生成时间表。首个到达位于 `t0`，计划窗口截止于 `t0 + floor(N × 1000000000 / R)` 纳秒。速率上限对应纳秒时间表示的边界，不表示客户端能达到该发起速率。
+
+调度器不会等待空闲 worker。已获得名额但尚未执行的任务与执行中的任务合计不超过 `min(workers, requests)`；没有名额的当前到达计入 `dropped_busy`。一个到达时隙在下一个计划到达时刻过期，最后一个时隙在窗口截止时过期。调度器醒来时已经过期的时隙计入 `dropped_late`，直接跳过，避免补发突发流量。成功获得名额的任务会执行完毕，其等待 worker 调度与负载生成的时间反映在调度延迟中。
+
+丢弃属于客户端负载未能完整发起的证据，不能直接解释为服务端拒绝。`dropped_busy` 与 worker 数量、请求持续时间有关；`dropped_late` 也可能受客户端调度或主机负载影响。测量至少覆盖完整计划窗口，然后等待所有已发起请求结束，因此不会在服务变慢时把计划自动改成较低到达率，也不会把最后一个请求提前完成后的剩余窗口从吞吐量分母中删去。
 
 ## 稳定的请求集合
 
@@ -53,9 +74,11 @@ JSON 模式下，数据预置进度和诊断写入 stderr，stdout 只包含报�
 
 固定负载集合不等于固定并发执行结果：请求到达顺序、GET/DELETE 命中率与最终状态仍可能不同。算法版本变化时，同一个 seed 不代表与旧版本相同的负载。客户端版本和 `workload_generator` 都应保留在比较记录中。
 
+固定到达模式沿用原始计划到达编号生成请求，跳过的编号不会由后续请求补上。因此相同 seed 固定的是计划请求集合；不同运行的实际发起子集可能随丢弃情况变化。
+
 ## JSON schema 1
 
-报告中的时间戳为 UTC RFC 3339，`*_ns` 与 `latency_ns` 内的时间单位为纳秒。请求计数和配置字段使用整数。
+报告中的时间戳为 UTC RFC 3339，`*_ns` 与延迟分布内的时间单位为纳秒。请求计数和配置字段使用整数。固定到达字段是 schema 1 的增量扩展：闭环报告继续省略 `config.rate` 与四个固定到达顶层字段，已有字段的统计口径保持不变。
 
 | 顶层字段 | 内容 |
 | --- | --- |
@@ -63,22 +86,42 @@ JSON 模式下，数据预置进度和诊断写入 stderr，stdout 只包含报�
 | `started_at` | 本次实验开始时间，位于数据预置之前 |
 | `measurement_started_at` | 测量阶段开始时间；数据预置失败时省略 |
 | `complete` / `error` | 测量是否完成，以及启动测量前的失败分类 |
-| `load_model` | 当前为 `closed_loop`，每个 worker 等上一个请求结束后再发下一个 |
+| `load_model` | `closed_loop` 或 `fixed_arrival` |
 | `workload_generator` | 按请求编号生成负载的算法版本 |
-| `config` | 完整客户端配置：URL、worker/request 数、操作、key 空间、超时、比例、预置、seed 和 value 大小 |
+| `config` | 完整客户端配置：URL、worker/request 数、操作、key 空间、超时、比例、预置、seed 和 value 大小；固定到达模式另有 `rate` |
 | `client_build` | 客户端 Go 版本、操作系统、架构；构建信息可得时附带 VCS 提交、时间和工作区修改标志 |
 | `preload` | `target_keys`、`completed_keys`、`elapsed_ns`，与测量结果分开记录 |
-| `elapsed_ns` | 测量请求分发到全部完成的耗时，不含数据预置和报告排序 |
+| `elapsed_ns` | 测量开始至全部已发起请求完成；固定到达模式同时覆盖完整计划窗口，不含数据预置和报告排序 |
 | `outcomes` | 请求结果及互斥失败分类，见下表 |
 | `operations` | 实际生成并尝试的 `put`、`get`、`delete` 数量，包含失败请求 |
 | `http_statuses` | 已收到的 HTTP 状态分布；JSON 对象的状态码键为字符串 |
-| `latency_ns` | `samples`、`mean`、`min`、`p50`、`p95`、`p99`、`p99_9`、`max` |
-| `qps_total` / `qps_successful` | 总测量请求数 / 成功加正常未命中数除以测量秒数 |
-| `system_success_rate_pct` | 成功加正常未命中占全部测量请求的百分比 |
+| `latency_ns` | 已发起请求的服务延迟：`samples`、`mean`、`min`、`p50`、`p95`、`p99`、`p99_9`、`max` |
+| `qps_total` / `qps_successful` | 实际完成请求数 / 成功加正常未命中数除以 `elapsed_ns` 对应秒数 |
+| `system_success_rate_pct` | 成功加正常未命中占实际完成请求的百分比 |
+| `arrivals` | 仅固定到达：计划、实际发起、两种丢弃数量与计划窗口时长 |
+| `dispatch_delay_ns` | 仅固定到达：计划到达至服务延迟计时起点，分布字段同 `latency_ns` |
+| `scheduled_latency_ns` | 仅固定到达：计划到达至请求结束，分布字段同 `latency_ns` |
+| `offered_success_rate_pct` | 仅固定到达：成功加正常未命中占全部计划到达的百分比 |
 
 `config.preload_count` 保留原始配置，`preload.target_keys` 给出根据模式、开关和 key 空间计算的实际目标数。例如配置 20000、keyspace 1000 时，两者分别为 20000 和 1000。`config.timeout_ns` 保存解析后的完整超时值；输出格式本身不改变负载。
 
 延迟使用单调时钟测量 HTTP 请求构造、编码与收发过程，包含失败请求，不包含 key/value 的负载生成。百分位数使用排序后的 nearest-rank 样本；平均值向下取整到纳秒，累计计算不会因所有请求耗时之和超过 int64 而溢出。
+
+固定到达的三组延迟覆盖同一组实际发起请求，均包含失败请求。调度延迟包含计划到达之后的调度、任务交接与 key/value 生成，服务延迟保留上述原有口径；每个请求的计划到完成延迟等于两者之和，但不能把两组 P99 相加当作计划到完成 P99。丢弃的到达没有请求延迟样本，不补入 0 或虚构的超时值。没有实际发起请求时，三组分布的 `samples` 与各统计值均为 0，`system_success_rate_pct` 也为 0。
+
+`arrivals` 的字段与对账关系如下：
+
+| 字段 | 口径 |
+| --- | --- |
+| `planned` | `config.requests`，计划到达数 |
+| `started` | 实际发起并等待结束的请求数，等于 `outcomes.requests` |
+| `dropped_busy` | 当前时隙有效，但没有可用 worker 名额 |
+| `dropped_late` | 调度器检查时，时隙已经过期 |
+| `schedule_duration_ns` | `floor(planned × 1000000000 / config.rate)`，计划窗口时长；不是实际测量耗时 |
+
+完成测量后，`planned = started + dropped_busy + dropped_late`；`started` 同时等于三组延迟各自的样本数与 `operations` 计数之和。预置失败时测量没有开始，不应用这条到达对账关系。丢弃不加入 `outcomes.failures` 或 HTTP 状态码计数。
+
+例如计划 100 个到达，10 个实际发起且全部成功，80 个因名额不足丢弃、10 个过期丢弃：`complete=true`、`outcomes.requests=10`、`outcomes.failures=0`、`system_success_rate_pct=100`，同时 `offered_success_rate_pct=10`，进程退出 1。解释延迟和成功率时必须一起读取丢弃数量；计划到完成延迟仍只描述实际发起的子集。
 
 ## 失败分类与状态码
 
@@ -98,4 +141,4 @@ JSON 模式下，数据预置进度和诊断写入 stderr，stdout 只包含报�
 
 失败分类先检查响应体是否读取失败或超限，只有完整读取且未超限时才按状态与正文契约分类。例如 HTTP 504 后正文截断仍是传输错误。已收到响应头后，即使正文截断或读取超时，HTTP 状态也保留在 `http_statuses`；在收到响应头之前失败的请求没有状态码。因此 HTTP 200 的数量不等于成功请求数，也可能与网络错误同时出现。HTTP 状态分布和失败分类分别描述响应的两个方面，不能相加当作总请求数。
 
-负载仍为固定并发的闭环模型；要测固定到达速率下的过载行为，需要另行设计实验，不能仅凭闭环 P99 宣称系统容量。完整实验要求见[性能实验](testing.md#运行一次可复现的压测)。
+比较固定到达实验时，应同时记录目标速率、worker 上限、实际发起与丢弃、请求失败、三组延迟和资源使用。闭环与固定到达的延迟反映不同负载条件，单次 P99 或成功吞吐量不能单独证明系统容量。完整实验要求见[性能实验](testing.md#运行一次可复现的压测)。

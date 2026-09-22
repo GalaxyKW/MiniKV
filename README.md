@@ -194,7 +194,16 @@ python3 benmark/summarize.py /tmp/minikv-readme-experiment
 
 输出目录必须尚不存在。默认运行两种 WAL 模式 × 快照开关 × 3 次，每轮 20,000 请求、20 个客户端 worker、1,000 key、4 个引擎线程；这与上表不同，重跑表中负载见[版本对照复现步骤](docs/performance-async-controls.md#原始归档与复现)。
 
-汇总会核对配置、操作计数、WAL 序列与采样区间，保留失败、缺失和中断轮次，并支持文本、JSON 与 CSV。负载由 seed 和请求编号确定，改变并发数不改变请求内容集合。完整参数、产物和证据不足时的处理见[自动化性能实验](docs/benchmark-experiments.md)；连接已有服务的单次压测见[测试指南](docs/testing.md#运行一次可复现的压测)。
+汇总会核对配置、操作计数、WAL 序列与采样区间，保留失败、缺失和中断轮次，并支持文本、JSON 与 CSV。负载由 seed 和请求编号确定，改变并发数不改变每个计划请求的内容；固定到达率下实际发起的子集可能因丢弃而变化。完整参数、产物和证据不足时的处理见[自动化性能实验](docs/benchmark-experiments.md)；连接已有服务的单次压测见[测试指南](docs/testing.md#运行一次可复现的压测)。
+
+固定到达率模式可用 `--rate` 指定每秒计划请求数，观察负载超过 worker 容量时的行为：
+
+```sh
+make benchmark BENCH_ARGS='--output /tmp/minikv-arrival-experiment --rate 2000 --requests 20000 --workers 20 --repeats 1'
+python3 benmark/summarize.py /tmp/minikv-arrival-experiment
+```
+
+请求不会因服务变慢而无限排队；报告分别保留容量不足丢弃、调度迟到丢弃，以及从计划时刻到完成的延迟。完整但有丢弃或请求失败的实验标为 `degraded`，保留指标且退出 1。这个示例用于验证流程，不能据此认定容量上限；负载模型与分母见[固定到达率实验](docs/benchmark-experiments.md#固定到达率与过载)。
 
 快照阶段与持锁指标还可通过[离线复查命令](docs/benchmark-experiments.md#离线复查快照阶段与持锁)从归档重算：保留共同采样窗口和原始差值，区分字段缺失、真实零值与观测不足。
 
@@ -204,7 +213,7 @@ python3 benmark/summarize.py /tmp/minikv-readme-experiment
 
 | 优先级 | 方向 | 验收条件 |
 | --- | --- | --- |
-| P1 | 扩大异步确认的负载验证 | 在已有交错对照基础上延长运行，加入慢盘、过载和固定到达率负载，联合检查失败率、P99、请求名额与内存 |
+| P1 | 扩大异步确认的负载验证 | 使用已提供的固定到达率工具扩大交错对照、延长运行并加入慢盘；联合检查丢弃率、失败率、计划到达至完成的 P99、请求名额与内存 |
 | P2 | 缩短快照捕获持锁，继续验证写缓冲的取舍 | 使用已有的临界区与写入量指标评估状态副本方案，同时覆盖快照开关、短 value 与频繁覆盖写入；联合检查尾延迟、吞吐和内存，局部阶段变快仍需通过端到端验收 |
 | P3 | 评估分段 WAL 与回收方案 | 以 P2 为依据比较实现；给出空间与暂停时间收益，并通过现有故障注入和恢复检查 |
 

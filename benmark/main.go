@@ -20,6 +20,7 @@ type benchConfig struct {
 	baseURL      string
 	workers      int
 	requests     int
+	rate         int
 	op           string
 	keyspace     int
 	timeout      time.Duration
@@ -39,6 +40,10 @@ func (cfg benchConfig) workerCount() int {
 
 type benchResult struct {
 	latencies            []time.Duration
+	dispatchDelays       []time.Duration
+	scheduledLatencies   []time.Duration
+	droppedBusy          int
+	droppedLate          int
 	successes            int64
 	failures             int64
 	logicalMisses        int64
@@ -59,6 +64,12 @@ type benchResult struct {
 type kvRequest struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+}
+
+type benchmarkJob struct {
+	requestIndex int
+	sampleIndex  int
+	scheduledAt  time.Time
 }
 
 func newHTTPClient(cfg benchConfig) *http.Client {
@@ -201,84 +212,72 @@ func runBenchmarkWithProgress(cfg benchConfig, progress io.Writer) (benchResult,
 	}
 	result.latencies = make([]time.Duration, cfg.requests)
 
-	jobs := make(chan int)
+	// Reserving a slot bounds both queued and executing work by workerCount.
+	// A fixed arrival never waits for capacity and never grows a backlog.
+	var capacity chan struct{}
+	var clock *wallArrivalClock
+	jobs := make(chan benchmarkJob)
+	if cfg.rate > 0 {
+		clock = newArrivalClock()
+		defer clock.timer.Stop()
+		capacity = make(chan struct{}, workers)
+		jobs = make(chan benchmarkJob, workers)
+		result.dispatchDelays = make([]time.Duration, cfg.requests)
+		result.scheduledLatencies = make([]time.Duration, cfg.requests)
+	}
 	workerResults := make([]benchResult, workers)
-
-	var wg sync.WaitGroup
+	var wg, ready sync.WaitGroup
+	if cfg.rate > 0 {
+		ready.Add(workers)
+	}
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 			local := benchResult{statusCount: make(map[int]int64), operations: make(map[string]int64)}
-			for i := range jobs {
-				request := requestFor(cfg, i)
-				op, key, value := request.operation, request.key, request.value
-				local.operations[op]++
-
-				start := time.Now()
-				status := 0
-				body := ""
-				var err error
-				switch op {
-				case "put":
-					status, body, err = doPut(client, cfg.baseURL, key, value)
-				case "get":
-					status, body, err = doGet(client, cfg.baseURL, key)
-				case "delete":
-					status, body, err = doDelete(client, cfg.baseURL, key)
-				default:
-					err = fmt.Errorf("不支持的操作类型: %s", op)
-				}
-				// Each job owns a distinct slot; the slice is read only after wg.Wait.
-				result.latencies[i] = time.Since(start)
-
-				if status != 0 {
-					local.statusCount[status]++
-				}
-				if err != nil {
-					if errors.Is(err, errResponseTooLarge) {
-						local.protocolFailures++
-					} else {
-						local.errors++
-						var timeout net.Error
-						if errors.As(err, &timeout) && timeout.Timeout() {
-							local.timeouts++
-						}
-					}
-					local.failures++
-					continue
-				}
-
-				success, miss := classifyResult(op, status, body)
-				if miss {
-					local.logicalMisses++
-					continue
-				}
-
-				if success {
-					local.successes++
-				} else {
-					local.failures++
-					if status == http.StatusOK || ((op == "get" || op == "delete") && status == http.StatusNotFound) {
-						local.protocolFailures++
-					} else {
-						local.httpFailures++
-					}
+			if cfg.rate > 0 {
+				ready.Done()
+			}
+			for job := range jobs {
+				executeBenchmarkJob(cfg, client, job, &result, &local)
+				if capacity != nil {
+					<-capacity
 				}
 			}
 			workerResults[workerID] = local
 		}(w)
 	}
-
+	if cfg.rate > 0 {
+		ready.Wait()
+	}
 	start := time.Now()
 	result.measurementStartedAt = start.UTC()
-	for i := 0; i < cfg.requests; i++ {
-		jobs <- i
+	if cfg.rate > 0 {
+		counts := scheduleArrivals(cfg.requests, cfg.rate, start, clock, func(index int, scheduled time.Time) bool {
+			select {
+			case capacity <- struct{}{}:
+				jobs <- benchmarkJob{requestIndex: index, sampleIndex: result.total, scheduledAt: scheduled}
+				result.total++
+				return true
+			default:
+				return false
+			}
+		})
+		result.droppedBusy, result.droppedLate = counts.busy, counts.late
+	} else {
+		for i := 0; i < cfg.requests; i++ {
+			jobs <- benchmarkJob{requestIndex: i, sampleIndex: i}
+		}
+		result.total = cfg.requests
 	}
 	close(jobs)
 	wg.Wait()
 	result.elapsed = time.Since(start)
-	result.total = cfg.requests
+	result.latencies = result.latencies[:result.total]
+	if cfg.rate > 0 {
+		result.dispatchDelays = result.dispatchDelays[:result.total]
+		result.scheduledLatencies = result.scheduledLatencies[:result.total]
+	}
 	for _, local := range workerResults {
 		result.errors += local.errors
 		result.successes += local.successes
@@ -295,6 +294,64 @@ func runBenchmarkWithProgress(cfg benchConfig, progress io.Writer) (benchResult,
 		}
 	}
 	return result, nil
+}
+
+// Each admitted job owns a distinct sample slot. Aggregation and slice resizing
+// happen only after all workers finish; worker counters stay private.
+func executeBenchmarkJob(cfg benchConfig, client *http.Client, job benchmarkJob, result, local *benchResult) {
+	request := requestFor(cfg, job.requestIndex)
+	op, key, value := request.operation, request.key, request.value
+	local.operations[op]++
+	start := time.Now()
+	var status int
+	var body string
+	var err error
+	switch op {
+	case "put":
+		status, body, err = doPut(client, cfg.baseURL, key, value)
+	case "get":
+		status, body, err = doGet(client, cfg.baseURL, key)
+	case "delete":
+		status, body, err = doDelete(client, cfg.baseURL, key)
+	default:
+		err = fmt.Errorf("不支持的操作类型: %s", op)
+	}
+	end := time.Now()
+	result.latencies[job.sampleIndex] = end.Sub(start)
+	if cfg.rate > 0 {
+		result.dispatchDelays[job.sampleIndex] = start.Sub(job.scheduledAt)
+		result.scheduledLatencies[job.sampleIndex] = end.Sub(job.scheduledAt)
+	}
+	if status != 0 {
+		local.statusCount[status]++
+	}
+	if err != nil {
+		if errors.Is(err, errResponseTooLarge) {
+			local.protocolFailures++
+		} else {
+			local.errors++
+			var timeout net.Error
+			if errors.As(err, &timeout) && timeout.Timeout() {
+				local.timeouts++
+			}
+		}
+		local.failures++
+		return
+	}
+	success, miss := classifyResult(op, status, body)
+	switch {
+	case miss:
+		local.logicalMisses++
+	case success:
+		local.successes++
+	default:
+		local.failures++
+		if status == http.StatusOK || ((op == "get" || op == "delete") && status == http.StatusNotFound) {
+			local.protocolFailures++
+		} else {
+			local.httpFailures++
+		}
+	}
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -319,7 +376,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, runErr)
 		return 1
 	}
-	if result.failures > 0 {
+	if result.failures > 0 || result.droppedBusy > 0 || result.droppedLate > 0 {
 		return 1
 	}
 	return 0

@@ -2,6 +2,7 @@
 """Summarize recorded MiniKV experiments without modifying or rerunning them."""
 
 import argparse
+from collections import deque
 import csv
 import hashlib
 import json
@@ -11,12 +12,16 @@ import re
 import statistics
 import sys
 
-from experiment import ExperimentError, read_report, timestamp_ns, validate_stats
+from experiment import (ExperimentError, arrival_metrics, benchmark_exit_code, fixed_arrival_settled, read_report, report_degraded,
+                        timestamp_ns, validate_arrival_config, validate_fixed_completion, validate_stats)
 
 
 ROLES = ("engine", "gateway", "bench")
 MEMORY_FIELDS = ("measurement_sampled_rss_max_bytes", "observed_lifetime_hwm_bytes")
-STATUSES = ("valid", "failed", "interrupted", "missing", "incomplete", "invalid")
+STATUSES = ("valid", "degraded", "failed", "interrupted", "missing", "incomplete", "invalid")
+MEASURED = ("valid", "degraded")
+FIXED_METRICS = ("rate", "arrival_planned", "arrival_started", "dropped_busy", "dropped_late", "failures",
+                 "offered_success_rate_pct", "dispatch_p99_ms", "scheduled_p99_ms")
 UNITS = {"qps_successful": "requests/s", "p99_ms": "ms", "memory": "bytes"}
 
 
@@ -76,6 +81,7 @@ def manifest_for(directory):
               "repeats": (1, 1000), "sample_ms": (0, 60000), "stats_ms": (0, 60000)}
     for name, bounds in limits.items():
         require(integer(args.get(name), *bounds), "invalid manifest argument: " + name)
+    validate_arrival_config(args.get("rate", 0), args["requests"], (1 << 63) - 1)
     for name in ("run_timeout", "startup_timeout", "shutdown_timeout", "settle_timeout"):
         value = args.get(name)
         require(type(value) in (int, float) and 0 < value <= sys.float_info.max, "invalid manifest timeout: " + name)
@@ -191,6 +197,9 @@ def config_for(root, manifest, case):
             "-timeout", "2s", "-write-ratio", str(args["write_ratio"]), "-delete-ratio", str(args["delete_ratio"]),
             "-preload=true", "-preload-count", "0", "-seed", str(args["seed"]),
             "-value-size", str(args["value_size"]), "-format", "json"]
+    if args.get("rate", 0):
+        expected["rate"] = args["rate"]
+        argv.extend(("-rate", str(args["rate"])))
     require(commands["bench"]["argv"] == argv and commands["bench"].get("environment") == {},
             "benchmark command differs from manifest workload")
     return expected
@@ -200,16 +209,23 @@ def empty_memory():
     return {role: {field: None for field in MEMORY_FIELDS} for role in ROLES}
 
 
+def invalidate_row(row):
+    row.update(status="invalid", qps_successful=None, p99_ms=None, memory=empty_memory(), snapshot_comparison_eligible=False)
+    if row.get("load_model") == "fixed_arrival":
+        row.update({name: None for name in FIXED_METRICS if name != "rate"})
+
+
 def validate_completion(root, manifest, case, result, report):
     processes = result.get("processes")
     require(isinstance(processes, dict), "successful result lacks process exit evidence")
     for role in ROLES:
         state = processes.get(role)
         require(isinstance(state, dict) and type(state.get("returncode")) is int
-                and state["returncode"] == 0 and state.get("forced") is False
+                and state["returncode"] == (benchmark_exit_code(report) if role == "bench" else 0)
+                and state.get("forced") is False
                 and integer(state.get("pid"), minimum=1),
                 "successful result contradicts process exit: " + role)
-    snapshots = {}
+    snapshots, bodies = {}, {}
     for phase in ("before", "after", "settled"):
         body = load_json(safe_path(root, case["name"] + "/stats-" + phase + ".json"))
         validate_stats(body)
@@ -220,8 +236,13 @@ def validate_completion(root, manifest, case, result, report):
                 and type(pool) is int and pool == manifest["arguments"]["rpc_pool"],
                 "stats configuration differs from manifest: " + phase)
         snapshots[phase] = body["engine"]
+        bodies[phase] = body
     require(all(snapshots["before"][field] == 0 for field in ("keys", "applied_sequence", "durable_sequence", "wal_pending_bytes")),
             "startup stats do not describe an empty database")
+    if report["load_model"] == "fixed_arrival":
+        validate_fixed_completion(bodies["after"], bodies["settled"], report, case["wal_mode"])
+        validate_quiet_confirmation(root, case, result, bodies["settled"])
+        return
     # Every successful PUT/DELETE appends one record, including DELETE misses;
     # preload contributes one PUT per completed key. A drained but unrelated
     # stats file must not make a report with missing writes appear valid.
@@ -248,6 +269,31 @@ def read_samples(root, case, filename):
             sample = json.loads(line, parse_constant=reject_constant, parse_float=finite_float)
             require(isinstance(sample, dict), "invalid sampling record")
             yield sample
+
+
+def validate_quiet_confirmation(root, case, result, settled):
+    boundary = result.get("wal_drain_started_monotonic_ns")
+    require(integer(boundary, minimum=1), "missing fixed-arrival drain evidence boundary")
+    samples = list(deque(read_samples(root, case, "stats.jsonl"), maxlen=2))
+    require(len(samples) == 2, "fixed-arrival drain needs two quiet observations")
+    previous_start, previous_end = None, boundary
+    for sample in samples:
+        start, end = sample.get("monotonic_start_ns"), sample.get("monotonic_end_ns")
+        require(integer(start, minimum=1) and integer(end, minimum=1)
+                and previous_end <= start <= end and (previous_start is None or previous_start < start),
+                "fixed-arrival drain observations are not distinct and ordered after the drain boundary")
+        require("error" in sample and sample["error"] is None
+                and type(sample.get("http_status")) is int and sample["http_status"] == 200,
+                "fixed-arrival drain observation did not succeed")
+        body = sample["body"]
+        validate_stats(body)
+        require(fixed_arrival_settled(body), "fixed-arrival drain lacks consecutive quiet observations")
+        require(body["engine"].get("wal_mode") == settled["engine"]["wal_mode"],
+                "fixed-arrival drain observation has a different WAL mode")
+        previous_start, previous_end = start, end
+    require(samples[-1]["body"] == settled, "confirmed drain observation differs from settled stats")
+    require(samples[0]["body"]["engine"]["applied_sequence"] <= settled["engine"]["applied_sequence"],
+            "applied sequence regressed between quiet observations")
 
 
 def observe(root, case, report, row, processes):
@@ -331,6 +377,9 @@ def read_run(root, manifest, case, provenance_errors):
     row = {"name": case["name"], "status": "missing", "errors": [], "warnings": [],
            "qps_successful": None, "p99_ms": None, "snapshot_activity_observed": None,
            "snapshot_comparison_eligible": False, "memory": empty_memory()}
+    if manifest["arguments"].get("rate", 0):
+        row.update({name: None for name in FIXED_METRICS})
+        row.update(load_model="fixed_arrival", rate=manifest["arguments"]["rate"])
     try:
         result = load_json(safe_path(root, case["name"] + "/result.json"))
         require(isinstance(result, dict) and type(result.get("schema_version")) is int
@@ -341,8 +390,9 @@ def read_run(root, manifest, case, provenance_errors):
         errors = result.get("errors")
         require(isinstance(errors, list) and all(isinstance(error, str) for error in errors), "invalid result errors")
         status = result.get("status")
-        require(status in ("ok", "failed", "interrupted", "running"), "unknown run status")
-        if status != "ok":
+        require(status in ("ok", "degraded", "failed", "interrupted", "running"), "unknown run status")
+        require(status != "degraded" or manifest["arguments"].get("rate", 0), "closed-loop result cannot be degraded")
+        if status not in ("ok", "degraded"):
             row["status"] = "incomplete" if status == "running" else status
             row["errors"] = errors or ["recorded run status: " + status]
             return row
@@ -353,19 +403,29 @@ def read_run(root, manifest, case, provenance_errors):
         if not report_path.exists():
             raise FileNotFoundError(str(report_path))
         report = read_report(report_path, expected)
+        require((status == "degraded") == report_degraded(report), "run status contradicts measured workload losses")
         require(all(type(report["config"][key]) is type(value) for key, value in expected.items()), "report configuration type mismatch")
         validate_completion(root, manifest, case, result, report)
-        row.update(status="valid", qps_successful=report["qps_successful"],
-                   p99_ms=report["latency_ns"]["p99"] / 1000000,
+        row.update(status="degraded" if report_degraded(report) else "valid", qps_successful=report["qps_successful"],
+                   p99_ms=report["latency_ns"]["p99"] / 1000000 if report["outcomes"]["requests"] else None,
                    workload_generator=report["workload_generator"])
+        if report["load_model"] == "fixed_arrival":
+            row.update(arrival_metrics(report))
+        if row["status"] == "degraded":
+            row["warnings"].append("Complete fixed-arrival measurement contains dropped arrivals or failed requests.")
         observe(root, case, report, row, result["processes"])
-        row["snapshot_comparison_eligible"] = case["snapshot_interval_ms"] == 0 or row["snapshot_activity_observed"] is True
-        if not row["snapshot_comparison_eligible"]:
+        row["snapshot_comparison_eligible"] = row["status"] == "valid" and (
+            case["snapshot_interval_ms"] == 0 or row["snapshot_activity_observed"] is True)
+        if row["status"] == "degraded":
+            row["warnings"].append("Degraded workload is excluded from clean snapshot comparisons.")
+        elif not row["snapshot_comparison_eligible"]:
             row["warnings"].append("snapshot activity was not established inside measurement; do not infer snapshot cost")
     except FileNotFoundError as error:
+        if row["status"] in MEASURED:
+            invalidate_row(row)
         row["errors"].append("missing artifact: " + str(error))
     except Exception as error:
-        row.update(status="invalid", qps_successful=None, p99_ms=None, memory=empty_memory(), snapshot_comparison_eligible=False)
+        invalidate_row(row)
         row["errors"].append(str(error))
     return row
 
@@ -391,16 +451,20 @@ def summarize_experiment(root, manifest):
         group = groups.setdefault(key, {"wal_mode": key[0], "snapshot_interval_ms": key[1], "runs": []})
         group["runs"].append(read_run(root, manifest, case, provenance_errors))
     rows = [row for group in groups.values() for row in group["runs"]]
-    generators = {row["workload_generator"] for row in rows if row["status"] == "valid"}
+    generators = {row["workload_generator"] for row in rows if row["status"] in MEASURED}
     if len(generators) > 1:
         for row in rows:
-            if row["status"] == "valid":
-                row.update(status="invalid", qps_successful=None, p99_ms=None, memory=empty_memory(), snapshot_comparison_eligible=False)
+            if row["status"] in MEASURED:
+                invalidate_row(row)
                 row["errors"].append("workload generator differs across runs using the same recorded binary")
     for group in groups.values():
-        valid = [row for row in group["runs"] if row["status"] == "valid"]
+        valid = [row for row in group["runs"] if row["status"] in MEASURED]
         group["counts"] = counts(group["runs"])
-        group["distributions"] = {name: distribution([row[name] for row in valid]) for name in ("qps_successful", "p99_ms")}
+        metrics = ("qps_successful", "p99_ms")
+        if manifest["arguments"].get("rate", 0):
+            group.update(load_model="fixed_arrival", rate=manifest["arguments"]["rate"])
+            metrics += FIXED_METRICS
+        group["distributions"] = {name: distribution([row[name] for row in valid]) for name in metrics}
         group["distributions"]["memory"] = {
             role: {field: distribution([row["memory"][role][field] for row in valid]) for field in MEMORY_FIELDS}
             for role in ROLES}
@@ -411,7 +475,7 @@ def summarize_experiment(root, manifest):
 
 
 def metric_values(row):
-    for name in ("qps_successful", "p99_ms"):
+    for name in ("qps_successful", "p99_ms") + (FIXED_METRICS if row.get("load_model") == "fixed_arrival" else ()):
         yield name, row[name]
     for role in ROLES:
         for field in MEMORY_FIELDS:
@@ -419,7 +483,7 @@ def metric_values(row):
 
 
 def metric_distributions(group):
-    for name in ("qps_successful", "p99_ms"):
+    for name in ("qps_successful", "p99_ms") + (FIXED_METRICS if group.get("load_model") == "fixed_arrival" else ()):
         yield name, group["distributions"][name]
     for role in ROLES:
         for field in MEMORY_FIELDS:
@@ -436,7 +500,7 @@ def write_csv(summary, output):
             base = {"schema_version": 1, "experiment": experiment["path"], "wal_mode": group["wal_mode"],
                     "snapshot_interval_ms": group["snapshot_interval_ms"]}
             for row in group["runs"]:
-                metrics = list(metric_values(row)) if row["status"] == "valid" else [("", None)]
+                metrics = list(metric_values(row)) if row["status"] in MEASURED else [("", None)]
                 for metric, value in metrics:
                     writer.writerow(dict(base, record_type="run", run=row["name"], status=row["status"],
                                          metric=metric, value=value, snapshot_activity_observed=row["snapshot_activity_observed"],
@@ -457,8 +521,13 @@ def write_text(summary, output):
                                                           ", ".join("{}={}".format(key, value) for key, value in group["counts"].items())))
             for row in group["runs"]:
                 output.write("    {} [{}]".format(row["name"], row["status"]))
-                if row["status"] == "valid":
-                    output.write(" QPS={:.3f}, P99={:.6f} ms".format(row["qps_successful"], row["p99_ms"]))
+                if row["status"] in MEASURED:
+                    p99 = "{:.6f} ms".format(row["p99_ms"]) if row["p99_ms"] is not None else "unavailable"
+                    output.write(" QPS={:.3f}, P99={}".format(row["qps_successful"], p99))
+                    if row.get("load_model") == "fixed_arrival":
+                        output.write("; offered={}/s attempted={}/{} dropped busy/late={}/{} failures={} offered success={:.3f}%".format(
+                            row["rate"], row["arrival_started"], row["arrival_planned"], row["dropped_busy"], row["dropped_late"],
+                            row["failures"], row["offered_success_rate_pct"]))
                     for role in ROLES:
                         memory = row["memory"][role]
                         output.write("; {} RSS/HWM={}/{} bytes".format(role, memory[MEMORY_FIELDS[0]], memory[MEMORY_FIELDS[1]]))
@@ -485,7 +554,10 @@ def main(argv=None):
         parser.error(str(error))
     experiments = [summarize_experiment(root, manifest) for root, manifest in sources]
     totals = {key: sum(experiment["counts"][key] for experiment in experiments) for key in experiments[0]["counts"]}
-    summary = {"schema_version": 1, "units": UNITS, "counts": totals, "experiments": experiments}
+    units = dict(UNITS)
+    if any(experiment["arguments"].get("rate", 0) for experiment in experiments):
+        units.update(rate="requests/s", offered_success_rate_pct="percent", dispatch_p99_ms="ms", scheduled_p99_ms="ms")
+    summary = {"schema_version": 1, "units": units, "counts": totals, "experiments": experiments}
     try:
         if args.format == "json":
             json.dump(summary, sys.stdout, ensure_ascii=False, indent=2, allow_nan=False)
@@ -499,7 +571,7 @@ def main(argv=None):
         print("Cannot write summary: " + str(error), file=sys.stderr)
         return 1
     if totals["valid"] != totals["planned"]:
-        print("Some planned runs are failed, missing, interrupted, incomplete, or invalid; see the summary.", file=sys.stderr)
+        print("Some planned runs are degraded, failed, missing, interrupted, incomplete, or invalid; see the summary.", file=sys.stderr)
         return 1
     return 0
 

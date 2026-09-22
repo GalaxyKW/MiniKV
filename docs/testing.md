@@ -52,6 +52,7 @@ make docs-test
 | HTTP 与 RPC | 参数与状态码映射、非法查询串不执行后端操作、合法慢上传的响应预算、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
 | 运行状态 | WAL 队列与写盘批次区分、容量与可靠确认等待、任务排队计时、失败唤醒与重启归零；RPC 等待与重试、基础字段缺失或 null 不补零、旧引擎可选字段的透传语义 | [engine_test.cpp](../tests/engine_test.cpp)、[stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
 | 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理；并发聚合中成功、失败、未命中与网络错误的计数守恒 | [main_test.go](../benmark/main_test.go) |
+| 固定到达率 | 整数时隙边界、过期跳过、并发名额与末尾排空、原请求编号、三类延迟与丢弃守恒 | [arrival_test.go](../benmark/arrival_test.go)、[实验联动测试](../tests/experiment_arrival_test.py) |
 | 可复现实验 | 参数边界与无副作用解析、实际 worker 数受请求数限制、跨 worker 请求集合、低分配生成、精确分位数与大均值、JSON 输出与失败分类 | [config_test.go](../benmark/config_test.go)、[main_test.go](../benmark/main_test.go)、[workload_test.go](../benmark/workload_test.go)、[report_test.go](../benmark/report_test.go) |
 | 实验管理 | 新目录不覆盖、完整矩阵与失败产物、超时和信号下回收子进程、隔离继承环境、资源缺失与 PID 复用 | [experiment_test.py](../tests/experiment_test.py)、[experiment_support_test.py](../tests/experiment_support_test.py) |
 | 实验观测边界 | 持续小块响应仍受总截止时间限制、正文大小与截断检查；排除预置和跨测量边界的快照，区分 RSS 样本与生命周期峰值 | [experiment_http_test.py](../tests/experiment_http_test.py)、[experiment_observations_test.py](../tests/experiment_observations_test.py) |
@@ -133,7 +134,7 @@ cmake --build build-tsan --target engine_test snapshot_test stats_test async_tes
 - 请求数、并发度、操作比例、key 空间、value 大小、随机种子、预热方式与观测到的未命中率。
 - 每轮原始输出、重复轮次与波动；不要只保存最好的一轮。
 
-负载按 seed 和请求编号生成，相同负载参数下改变 worker 数量不会改变操作、key 和 value 的集合；并发调度仍会改变到达顺序、命中率和最终状态。比较时同时记录生成器版本。`throughput` 与 `reliable` 的成功确认语义不同，应分别报告结果。
+负载按 seed 和请求编号生成，相同负载参数下改变 worker 数量不会改变每个计划请求的操作、key 和 value；固定到达率下实际发起子集可能因丢弃而变化，并发调度也会改变到达顺序、命中率和最终状态。比较时同时记录生成器版本。`throughput` 与 `reliable` 的成功确认语义不同，应分别报告结果。
 
 使用 `-format json` 可以保存带版本的完整客户端配置与原始报告；stdout 只有 JSON，预置进度写入 stderr。参数校验、退出码、确定性负载和字段定义见[压测配置与 JSON 报告](benchmark-report.md)。
 
@@ -143,7 +144,8 @@ cmake --build build-tsan --target engine_test snapshot_test stats_test async_tes
 | --- | --- |
 | QPS | 所有已尝试请求数 / 测量耗时，包含失败请求 |
 | 成功吞吐量 | 成功请求与正常未命中之和 / 测量耗时 |
-| 系统成功率 | 成功请求与正常未命中之和 / 总请求数 |
+| 系统成功率 | 成功请求与正常未命中之和 / 实际尝试请求数 |
+| 到达成功率（固定速率） | 成功请求与正常未命中之和 / 计划到达数；丢弃也留在分母 |
 | 逻辑未命中 | GET/DELETE 返回 HTTP 404 且正文恰为 `NOT_FOUND\n` |
 | 失败请求 | 网络错误，或 HTTP 状态/响应格式不符合操作契约 |
 | 网络错误 | 客户端请求或读取响应失败，是失败请求的一部分；区分超时与其他传输错误 |
@@ -151,9 +153,21 @@ cmake --build build-tsan --target engine_test snapshot_test stats_test async_tes
 
 报告还列出 HTTP 状态码分布、实际操作数和 HTTP / 响应格式失败分类。收到响应头后即使正文读取失败，也保留该 HTTP 状态。工具会同时检查状态码和响应正文；预置失败或测量中存在系统失败时以非零状态退出，正常未命中本身不会导致失败退出。完整实现见 [压测工具](../benmark/main.go)。
 
-延迟保存在一个按请求编号索引的精确切片中，报告前排序计算分位数；该切片在 64 位环境中占约 `8 × requests` 字节，另有每个 worker 的局部计数。请求数很大时仍需为客户端准备足够内存。GET/DELETE 不生成写入 value，`value-size` 影响 PUT 和数据预置。
+闭环延迟保存在一个精确切片中，报告前排序计算分位数，占约 `8 × requests` 字节。固定到达率模式保留服务延迟、分发延迟和计划至完成延迟三个切片，分配约 `24 × requests` 字节；只有实际尝试的样本参与统计。另有每个 worker 的局部计数。请求数很大时仍需为客户端准备足够内存。GET/DELETE 不生成写入 value，`value-size` 影响 PUT 和数据预置。
 
-当前工具采用固定并发的闭环负载：每个 worker 等当前请求结束后才发送下一个请求。服务变慢时，客户端的发送速率也会下降；因此闭环 QPS 与 P99 不能单独证明系统在固定外部到达速率下的容量。评估过载行为还需要额外的固定到达速率实验，并联合观察排队、超时、拒绝和资源占用。当前工具未提供固定到达速率模式。
+默认 `-rate 0` 使用闭环负载：每个 worker 等当前请求结束后才发送下一个请求。服务变慢时发送速率也会下降，闭环 QPS 与 P99 不能单独证明固定外部到达速率下的容量。
+
+指定正整数 `-rate` 可按固定计划到达。例如以下命令计划在 10 秒内到达 20,000 次请求，并限制最多 20 个已接纳任务（含等待 worker 调度与执行的任务）：
+
+```sh
+./bin/minikv-bench -url http://127.0.0.1:8080/kv \
+  -op mixed -rate 2000 -requests 20000 -workers 20 \
+  -keyspace 1000 -preload-count 0 -format json
+```
+
+没有名额的到达计为 `dropped_busy`；调度器醒来时已过期的时隙计为 `dropped_late`，不补发。已接纳任务仍会执行，其调度和负载生成等待包含在 `dispatch_delay_ns` 与 `scheduled_latency_ns` 中。测量耗时包含完整计划窗口与末尾请求排空；`latency_ns` 继续统计实际尝试的服务延迟。
+
+丢弃不会产生延迟样本，因此必须同时查看到达成功率、两类丢弃、服务失败以及计划至完成 P99；零尝试时没有可解释的 P99。调度迟到反映客户端未能按计划发出请求，不能全部归因于服务端容量。分级提高到达率时，保持 worker 预算和主机条件一致，并联合观察排队、超时、拒绝和资源占用。自动化采集与验证见[固定到达率实验](benchmark-experiments.md#固定到达率与过载)。
 
 ## 评估快照的代价
 

@@ -3,6 +3,7 @@
 
 import copy
 import csv
+from datetime import datetime, timedelta
 import hashlib
 import io
 import json
@@ -24,6 +25,23 @@ def save_json(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
+def save_quiet_confirmation(run, result=None):
+    report = json.loads((run / "report.json").read_text())
+    settled = json.loads((run / "stats-settled.json").read_text())
+    samples = [json.loads(line) for line in (run / "stats.jsonl").read_text().splitlines()]
+    base = max(samples[-1]["monotonic_end_ns"] if samples else 0, report["elapsed_ns"] + 1000000000)
+    measured = datetime.fromisoformat(report["measurement_started_at"].replace("Z", "+00:00"))
+    for offset in (20000000, 40000000):
+        instant = base + offset
+        stamp = (measured + timedelta(microseconds=instant // 1000)).isoformat()
+        samples.append({"started_at": stamp, "finished_at": stamp, "monotonic_start_ns": instant,
+                        "monotonic_end_ns": instant, "http_status": 200, "body": copy.deepcopy(settled), "error": None})
+    (run / "stats.jsonl").write_text("".join(json.dumps(sample) + "\n" for sample in samples))
+    result = result if result is not None else json.loads((run / "result.json").read_text())
+    result["wal_drain_started_monotonic_ns"] = base + 20000000
+    save_json(run / "result.json", result)
+
+
 def file_snapshot(directory):
     snapshot = {}
     for path in sorted(directory.rglob("*")):
@@ -43,7 +61,7 @@ class ExperimentSummaryTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
 
-    def experiment(self, name="experiment", seed=1, binary_version="A"):
+    def experiment(self, name="experiment", seed=1, binary_version="A", rate=0):
         directory = self.directory / name
         directory.mkdir()
         binaries = directory / "binaries"
@@ -67,6 +85,8 @@ class ExperimentSummaryTests(unittest.TestCase):
             "stats_ms": 250, "run_timeout": 120, "startup_timeout": 10,
             "shutdown_timeout": 15, "settle_timeout": 10,
         }
+        if rate:
+            arguments["rate"] = rate
         manifest = {
             "schema_version": 1, "started_at": "2026-09-14T08:00:00Z", "arguments": arguments,
             "plan": [], "executables": executables,
@@ -129,6 +149,9 @@ class ExperimentSummaryTests(unittest.TestCase):
                    "-keyspace", str(args["keyspace"]), "-timeout", "2s", "-write-ratio", str(args["write_ratio"]),
                    "-delete-ratio", str(args["delete_ratio"]), "-preload=true", "-preload-count", "0",
                    "-seed", str(args["seed"]), "-value-size", str(args["value_size"]), "-format", "json"]
+        if args.get("rate", 0):
+            config["rate"] = args["rate"]
+            command.extend(("-rate", str(args["rate"])))
         commands = {"cwd": str(ROOT), "runtime_environment": manifest["runtime_environment"],
                     "engine": {"argv": [manifest["executables"]["engine"]["path"]], "environment": {
                         "MINIKV_DATA_DIR": str(run / "data"), "MINIKV_ENGINE_HOST": "127.0.0.1",
@@ -179,6 +202,16 @@ class ExperimentSummaryTests(unittest.TestCase):
                            "p95": 2000000, "p99": p99, "p99_9": p99, "max": p99 + 1000000},
             "qps_total": qps, "qps_successful": qps, "system_success_rate_pct": 100,
         }
+        if args.get("rate", 0):
+            schedule = count * 1000000000 // args["rate"]
+            report.update(load_model="fixed_arrival", arrivals={"planned": count, "started": count,
+                          "dropped_busy": 0, "dropped_late": 0, "schedule_duration_ns": schedule},
+                          dispatch_delay_ns={field: count if field == "samples" else 1000 for field in report["latency_ns"]},
+                          scheduled_latency_ns={field: value if field == "samples" else value + 1000
+                                                for field, value in report["latency_ns"].items()},
+                          offered_success_rate_pct=100)
+            report["elapsed_ns"] = max(report["elapsed_ns"], schedule)
+            report["qps_total"] = report["qps_successful"] = count * 1000000000 / report["elapsed_ns"]
         save_json(run / "report.json", report)
         expected_sequence = report["preload"]["completed_keys"] + report["operations"]["put"] + report["operations"]["delete"]
         stats, resources = [], []
@@ -189,6 +222,9 @@ class ExperimentSummaryTests(unittest.TestCase):
                                "wal_pending_bytes": 0, "snapshot_successes_total": 1 + (number if interval and snapshot_evidence else 0),
                                "snapshot_failures_total": 0, "snapshot_in_progress": False, "io_failed": False, "stopping": False},
                     "server": {"workers_capacity": 4}, "gateway": {"rpc": {"pool_capacity": 32}}}
+            if args.get("rate", 0):
+                body["server"]["requests_inflight"] = 0
+                body["gateway"]["rpc"]["pool_in_use"] = 0
             stats.append({"started_at": timestamp, "finished_at": timestamp, "monotonic_start_ns": millisecond * 1000000,
                           "monotonic_end_ns": millisecond * 1000000, "http_status": 200, "body": body, "error": None})
             resources.append({"sampled_at": timestamp, "monotonic_ns": millisecond * 1000000,
@@ -206,6 +242,8 @@ class ExperimentSummaryTests(unittest.TestCase):
         save_json(run / "stats-before.json", before)
         save_json(run / "stats-after.json", stats[-1]["body"])
         save_json(run / "stats-settled.json", stats[-1]["body"])
+        if args.get("rate", 0):
+            save_quiet_confirmation(run, result)
         index = json.loads((directory / "index.json").read_text())
         index["runs"] = [row for row in index["runs"] if row["name"] != name]
         index["runs"].append(result)
