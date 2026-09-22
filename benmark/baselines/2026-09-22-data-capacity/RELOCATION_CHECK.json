@@ -1,0 +1,28 @@
+{
+  "archive_sha256": "e3e600aaf91b2280f9499a3b897c0e0d3cf8e5bb748d464be4ba6ec920fcc55c",
+  "members_verified": 514,
+  "expected_analysis_exit": 1,
+  "actual_analysis_exit": 1,
+  "relocated_equal": {
+    "counts": true,
+    "rounds": true,
+    "pairs": true,
+    "comparisons": true
+  },
+  "counts": {
+    "planned_rounds": 48,
+    "eligible_rounds": 33,
+    "official_status": {
+      "valid": 33,
+      "degraded": 0,
+      "failed": 0,
+      "interrupted": 0,
+      "missing": 14,
+      "incomplete": 1,
+      "invalid": 0
+    },
+    "inconclusive_comparisons": 8
+  },
+  "binary_verification": "recorded_hashes_only",
+  "raw_execution_status_preserved": "running"
+}

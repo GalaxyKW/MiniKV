@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "checks": {
+    "exit_expected_inconclusive": true,
+    "counts_equal": true,
+    "round_values_equal": true,
+    "pairs_equal": true,
+    "comparisons_equal": true,
+    "original_artifact_opens_blocked_by_python_audit_hook": true,
+    "copied_binaries": "omitted; archived recorded hashes only"
+  },
+  "valid": true,
+  "plan_sha256": "42c9fb0a55e211be3aabb512821f23da86d52b3a73d93080da5a0049f0da7fd6",
+  "auditor_sha256": "7f68f4ef3d322156717a81cc0df94b77a3f40897889c6b59c2cac97caab59b0f"
+}
