@@ -6,7 +6,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fcntl.h>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -139,6 +138,74 @@ struct File {
     throw std::system_error(errno, std::generic_category(), operation);
 }
 
+bool entry_exists(int directory, const char* name) {
+    struct stat metadata{};
+    if (::fstatat(directory, name, &metadata, AT_SYMLINK_NOFOLLOW) == 0) return true;
+    if (errno == ENOENT) return false;
+    io_error(std::string("stat data entry ") + name);
+}
+
+int open_regular_at(int directory, const char* name, int flags, bool mutable_file = false) {
+    // Reject leaf aliases and special files before any read or write. Nonblocking
+    // open lets us reject a FIFO without waiting for another process to open it.
+    File file(::openat(directory, name, flags | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600));
+    if (file.fd < 0) io_error(std::string("open data file ") + name);
+    struct stat metadata{};
+    if (::fstat(file.fd, &metadata) != 0) io_error(std::string("stat data file ") + name);
+    if (!S_ISREG(metadata.st_mode)) throw std::runtime_error(std::string("data file is not regular: ") + name);
+    if (mutable_file && metadata.st_nlink > 1) {
+        throw std::runtime_error(std::string("mutable data file has multiple hard links: ") + name);
+    }
+    const int result = file.fd;
+    file.fd = -1;
+    return result;
+}
+
+int create_temporary_at(int directory, const char* name, int flags) {
+    // A leftover name may alias a live file or a backup. Remove only that name;
+    // never truncate its inode. Directories are errors, not recursively removed.
+    while (::unlinkat(directory, name, 0) != 0) {
+        if (errno == ENOENT) break;
+        if (errno != EINTR) io_error(std::string("remove stale temporary file ") + name);
+    }
+    return open_regular_at(directory, name, flags | O_CREAT | O_EXCL, true);
+}
+
+bool legacy_has_data(int directory, const char* name) {
+    if (!entry_exists(directory, name)) return false;
+    File file(open_regular_at(directory, name, O_RDONLY));
+    struct stat metadata{};
+    if (::fstat(file.fd, &metadata) != 0) io_error(std::string("stat legacy file ") + name);
+    return metadata.st_size != 0;
+}
+
+template <class Consumer>
+void read_legacy_lines(int directory, const char* name, const Consumer& consume) {
+    if (!entry_exists(directory, name)) return;
+    File file(open_regular_at(directory, name, O_RDONLY));
+    std::array<char, 8192> buffer;
+    std::string line;
+    while (true) {
+        const ssize_t count = ::read(file.fd, buffer.data(), buffer.size());
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) io_error(std::string("read legacy file ") + name);
+        if (count == 0) break;
+        std::string_view remaining(buffer.data(), static_cast<size_t>(count));
+        while (!remaining.empty()) {
+            const auto newline = remaining.find('\n');
+            if (newline == std::string_view::npos) {
+                line.append(remaining);
+                break;
+            }
+            line.append(remaining.substr(0, newline));
+            consume(line);
+            line.clear();
+            remaining.remove_prefix(newline + 1);
+        }
+    }
+    if (!line.empty()) throw std::runtime_error(std::string("incomplete legacy record in ") + name);
+}
+
 void write_all(int fd, std::string_view bytes, uint64_t* calls = nullptr, uint64_t* written_bytes = nullptr) {
     while (!bytes.empty()) {
         if (calls) ++*calls;
@@ -171,12 +238,16 @@ void sync_file(int fd) {
     }
 }
 
+void sync_directory(int directory) {
+    while (::fsync(directory) != 0) {
+        if (errno != EINTR) io_error("fsync data directory");
+    }
+}
+
 void sync_directory(const std::filesystem::path& path) {
     File dir(::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
     if (dir.fd < 0) io_error("open directory " + path.string());
-    while (::fsync(dir.fd) != 0) {
-        if (errno != EINTR) io_error("fsync directory " + path.string());
-    }
+    sync_directory(dir.fd);
 }
 
 void ensure_directory(const std::filesystem::path& path) {
@@ -202,11 +273,12 @@ Engine::Engine(EngineConfig config) : config_(std::move(config)) {
         config_.wal_queue_bytes < kMaxKeySize + kMaxValueSize + codec::kWalRecordHeader + 4) {
         throw std::invalid_argument("invalid engine configuration");
     }
-    config_.data_dir = std::filesystem::absolute(config_.data_dir).lexically_normal().string();
+    config_.data_dir = std::filesystem::absolute(config_.data_dir).string();
     try {
         ensure_directory(config_.data_dir);
-        lock_fd_ = ::open((config_.data_dir + "/LOCK").c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
-        if (lock_fd_ < 0) io_error("open data directory lock");
+        directory_fd_ = ::open(config_.data_dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (directory_fd_ < 0) io_error("open data directory");
+        lock_fd_ = open_regular_at(directory_fd_, "LOCK", O_RDWR | O_CREAT, true);
         if (::flock(lock_fd_, LOCK_EX | LOCK_NB) != 0) io_error("data directory is already in use");
         recover();
         worker_ = std::thread(&Engine::background_work, this);
@@ -242,17 +314,14 @@ void Engine::hook(const std::string& point) {
 void Engine::release_files() noexcept {
     if (wal_fd_ >= 0) { ::close(wal_fd_); wal_fd_ = -1; }
     if (lock_fd_ >= 0) { ::close(lock_fd_); lock_fd_ = -1; }
+    if (directory_fd_ >= 0) { ::close(directory_fd_); directory_fd_ = -1; }
 }
 
 void Engine::recover() {
-    namespace fs = std::filesystem;
-    const auto snapshot_path = config_.data_dir + "/snapshot.v1";
-    const auto wal_path = config_.data_dir + "/wal.v1";
-    if (fs::exists(snapshot_path)) {
+    if (entry_exists(directory_fd_, "snapshot.v1")) {
         if (config_.import_legacy) throw std::runtime_error("v1 data already exists; legacy import refused");
         load_snapshot();
-        wal_fd_ = ::open(wal_path.c_str(), O_RDWR | O_APPEND | O_CLOEXEC);
-        if (wal_fd_ < 0) io_error("open existing WAL (refusing to recreate missing data)");
+        wal_fd_ = open_regular_at(directory_fd_, "wal.v1", O_RDWR | O_APPEND, true);
         const bool legacy_wal = load_wal();
         sync_file(wal_fd_);
         durable_sequence_ = applied_sequence_;
@@ -264,28 +333,25 @@ void Engine::recover() {
     }
     // Even an empty WAL may belong to a checkpointed database whose snapshot
     // was lost. It is not evidence that this is a new, empty database.
-    if (fs::exists(wal_path)) {
+    if (entry_exists(directory_fd_, "wal.v1")) {
         throw std::runtime_error("snapshot missing beside v1 WAL; refusing to recreate missing data");
     }
-    const auto old_snapshot = config_.data_dir + "/data.db";
-    const auto old_wal = config_.data_dir + "/wal.log";
-    const bool legacy = (fs::exists(old_snapshot) && fs::file_size(old_snapshot) != 0) ||
-                        (fs::exists(old_wal) && fs::file_size(old_wal) != 0);
+    const bool old_snapshot = legacy_has_data(directory_fd_, "data.db");
+    const bool old_wal = legacy_has_data(directory_fd_, "wal.log");
+    const bool legacy = old_snapshot || old_wal;
     if (legacy && !config_.import_legacy) {
         throw std::runtime_error("legacy data detected; stop the old engine, back up the directory, then run engine --import-legacy");
     }
     if (legacy) import_legacy();
-    wal_fd_ = ::open(wal_path.c_str(), O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
-    if (wal_fd_ < 0) io_error("create WAL");
+    wal_fd_ = open_regular_at(directory_fd_, "wal.v1", O_RDWR | O_CREAT | O_EXCL | O_APPEND, true);
     write_all(wal_fd_, codec::wal_file_header());
     sync_file(wal_fd_);
-    sync_directory(config_.data_dir);
+    sync_directory(directory_fd_);
     snapshot();
 }
 
 void Engine::load_snapshot() {
-    File file(::open((config_.data_dir + "/snapshot.v1").c_str(), O_RDONLY | O_CLOEXEC));
-    if (file.fd < 0) io_error("open snapshot");
+    File file(open_regular_at(directory_fd_, "snapshot.v1", O_RDONLY));
     const std::string header = read_bytes(file.fd, 28);
     if (header.size() != 28 || header.substr(0, 8) != "MKVSNP01" ||
         codec::u32(header, 24) != codec::crc32(std::string_view(header).substr(0, 24))) {
@@ -313,7 +379,7 @@ void Engine::load_snapshot() {
     // Recovery may observe a rename from an interrupted installation. Make
     // that checkpoint durable before reclaiming any WAL records it covers.
     sync_file(file.fd);
-    sync_directory(config_.data_dir);
+    sync_directory(directory_fd_);
 }
 
 bool Engine::load_wal() {
@@ -379,25 +445,14 @@ bool Engine::load_wal() {
 }
 
 void Engine::import_legacy() {
-    const auto read_lines = [](const std::string& path, const auto& consume) {
-        if (!std::filesystem::exists(path)) return;
-        std::ifstream file(path, std::ios::binary);
-        if (!file) throw std::runtime_error("cannot read legacy file: " + path);
-        std::string line;
-        while (std::getline(file, line)) {
-            if (file.eof()) throw std::runtime_error("incomplete legacy record in " + path);
-            consume(line);
-        }
-        if (!file.eof()) throw std::runtime_error("error reading legacy file: " + path);
-    };
-    read_lines(config_.data_dir + "/data.db", [this](const std::string& line) {
+    read_legacy_lines(directory_fd_, "data.db", [this](const std::string& line) {
         const auto separator = line.find(':');
         if (separator == std::string::npos) throw std::runtime_error("invalid legacy snapshot record");
         Request entry{Operation::Put, line.substr(0, separator), line.substr(separator + 1)};
         if (!codec::valid_request(entry)) throw std::runtime_error("invalid legacy key/value size");
         kv_[entry.key] = entry.value;
     });
-    read_lines(config_.data_dir + "/wal.log", [this](const std::string& line) {
+    read_legacy_lines(directory_fd_, "wal.log", [this](const std::string& line) {
         std::istringstream input(line);
         std::string op, key, value;
         if (!(input >> op >> key)) throw std::runtime_error("invalid legacy WAL record");
@@ -604,10 +659,7 @@ void Engine::flush_locked() {
 
 void Engine::install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence,
                               uint64_t& write_calls, uint64_t& written_bytes, uint64_t& installed_bytes) {
-    const std::string temporary = config_.data_dir + "/snapshot.v1.tmp";
-    const std::string installed = config_.data_dir + "/snapshot.v1";
-    File file(::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600));
-    if (file.fd < 0) io_error("create snapshot");
+    File file(create_temporary_at(directory_fd_, "snapshot.v1.tmp", O_WRONLY));
     hook("snapshot.write");
     // Aggregate small records with bounded memory; oversized records go straight
     // to write_all after any preceding buffered bytes have been written.
@@ -635,9 +687,9 @@ void Engine::install_snapshot(const std::unordered_map<std::string, std::string>
     hook("snapshot.sync");
     sync_file(file.fd);
     hook("snapshot.rename");
-    if (::rename(temporary.c_str(), installed.c_str()) != 0) io_error("install snapshot");
+    if (::renameat(directory_fd_, "snapshot.v1.tmp", directory_fd_, "snapshot.v1") != 0) io_error("install snapshot");
     hook("snapshot.dir_sync");
-    sync_directory(config_.data_dir);
+    sync_directory(directory_fd_);
     installed_bytes = written_bytes;
     hook("snapshot.after_install");
 }
@@ -650,10 +702,7 @@ void Engine::compact_wal(int64_t boundary, uint64_t& written_bytes) {
         const off_t end = ::lseek(wal_fd_, 0, SEEK_END);
         if (end < 0) io_error("seek WAL for compaction");
         if (boundary < 0 || boundary > end) throw std::runtime_error("invalid WAL checkpoint boundary");
-        const std::string temporary = config_.data_dir + "/wal.v1.tmp";
-        const std::string installed = config_.data_dir + "/wal.v1";
-        File replacement(::open(temporary.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0600));
-        if (replacement.fd < 0) io_error("create WAL replacement");
+        File replacement(create_temporary_at(directory_fd_, "wal.v1.tmp", O_RDWR | O_APPEND));
         hook("wal.compact.write");
         write_all(replacement.fd, codec::wal_file_header(), nullptr, &written_bytes);
         std::array<char, 64 * 1024> buffer{};
@@ -670,7 +719,7 @@ void Engine::compact_wal(int64_t boundary, uint64_t& written_bytes) {
         hook("wal.compact.sync");
         sync_file(replacement.fd);
         hook("wal.compact.rename");
-        if (::rename(temporary.c_str(), installed.c_str()) != 0) io_error("install WAL replacement");
+        if (::renameat(directory_fd_, "wal.v1.tmp", directory_fd_, "wal.v1") != 0) io_error("install WAL replacement");
         // Once renamed, appends must use the new inode even if directory sync
         // fails. Swap descriptors before any throwing hook or syscall.
         const int previous = wal_fd_;
@@ -680,7 +729,7 @@ void Engine::compact_wal(int64_t boundary, uint64_t& written_bytes) {
         hook("wal.compact.after_replace");
         hook("wal.after_truncate");
         hook("wal.compact.dir_sync");
-        sync_directory(config_.data_dir);
+        sync_directory(directory_fd_);
     } catch (const std::exception& error) {
         std::lock_guard<std::mutex> lock(mutex_);
         fail_locked(error.what());

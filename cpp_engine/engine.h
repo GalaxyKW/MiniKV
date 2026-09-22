@@ -184,6 +184,9 @@ private:
     uint64_t applied_sequence_ = 0;
     uint64_t durable_sequence_ = 0;
     EngineStats stats_;
+    // All data entries and directory syncs stay with the directory we locked,
+    // even if its configured pathname is renamed or a symlink is repointed.
+    int directory_fd_ = -1;
     int wal_fd_ = -1;
     int lock_fd_ = -1;
     bool stopping_ = false;
