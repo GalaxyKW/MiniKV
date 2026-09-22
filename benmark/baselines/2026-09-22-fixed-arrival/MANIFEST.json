@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "All six pilot and eighteen formal fixed-arrival admission measurements. Formal arms compare confirmation wait and client worker budget; no slow-disk or maximum-throughput claim. The archive includes the pre-run plan, every runner artifact except binaries/data, original execution driver, offline analysis source/results, host context, and post-run binary checks.",
+  "runtime_revision": "286ed8e500175db6ecc5892d077c124be81bd548",
+  "plan_sha256": "791facc024f46bc3476bd69f4e701a5e0f3ef3069d7555e1438658d5c71451a2",
+  "analyzer_sha256": "1a03ed708919e5b40c0930aba27b22ae0a5ee77d1c03b117235c687c06949a63",
+  "binaries": {
+    "engine": "62fcc759dd2b967bc973df47b7d286de1ea22cc7d96db58bc39d7165a52b9dfc",
+    "gateway": "c8858b7698f6e868938df7c63caa0139082463a1ab2de7dafb102b8089947086",
+    "bench": "e61c53438d8fdea911e3b7cf4b5d299e4ad81cf2bb28fd72c8e9e43e0fc77434"
+  },
+  "archives": [
+    {
+      "file": "fixed-arrival.tar.gz",
+      "sha256": "a557b6daf1254aad6eebe12d90b5c7fff265b27a9217f42388052f60491130f5",
+      "size_bytes": 369508,
+      "raw_bytes": 4741083,
+      "files": 310,
+      "pilot_runs": 6,
+      "formal_runs": 18,
+      "formal_valid": 5,
+      "formal_degraded": 13
+    }
+  ]
+}
