@@ -3,7 +3,7 @@ BUILD_TYPE ?= RelWithDebInfo
 JOBS ?= 2
 BENCH_ARGS ?=
 
-.PHONY: all engine go test docs-test unit-test integration-test experiment-test benchmark sanitize-test clean
+.PHONY: all engine go test docs-test history-test unit-test integration-test experiment-test benchmark sanitize-test clean
 
 all: engine go
 
@@ -30,10 +30,13 @@ docs-test:
 	python3 -m unittest discover -s tests -p 'docs_test.py' -v
 	python3 tools/check_docs.py
 
+history-test:
+	python3 -m unittest discover -s tests -p 'history_checker_test.py' -v
+
 benchmark: all
 	python3 benmark/experiment.py --engine $(abspath $(BUILD_DIR))/engine $(BENCH_ARGS)
 
-test: docs-test unit-test integration-test experiment-test
+test: docs-test history-test unit-test integration-test experiment-test
 
 sanitize-test: go
 	cmake -S cpp_engine -B build-asan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DMINIKV_SANITIZERS=ON

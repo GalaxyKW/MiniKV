@@ -74,7 +74,7 @@ python3 benmark/summarize.py /tmp/minikv-data-capacity-experiment
 
 省略参数或指定 0 时，保留默认实验与旧版引擎、旧归档的兼容性。缺失的历史 `data_*` 字段不补成 0。正容量配置下的 BUSY 仍按真实 HTTP 503 计入请求失败；启用此参数不会把容量拒绝改算成功，也不会使预置失败变成有效测量。数据量是 key/value 字节之和，不是 RSS；具体定义见[数据集容量](design.md#数据集容量)。
 
-[容量功能对照](performance-data-capacity.md) 保存了旧引擎、新引擎不限额与启用上限的计划、实际中断证据及离线复查方法；矩阵未完成，不能据此断言零开销。
+[完整容量功能对照](performance-data-capacity-stagewise.md) 保存了旧引擎、新引擎不限额与启用上限的独立 48 轮矩阵及离线复查方法；八组比较未触发预设调查条件，不代表零开销或性能等价。[旧中断记录](performance-data-capacity.md) 单独保留，未与新矩阵合并。
 
 ## 固定到达率与过载
 

@@ -11,8 +11,9 @@ make sanitize-test
 
 | 命令 | 实际执行内容 |
 | --- | --- |
-| `make test` | 检查文档，构建 C++ 引擎、Go 网关与压测工具；运行七个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
+| `make test` | 检查文档与并发历史校验器，构建 C++ 引擎、Go 网关与压测工具；运行七个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
 | `make docs-test` | 检查 README 与 `docs/` 中的本地内联链接、标题锚点和 shell 示例语法，并验证检查器本身；只需 Python 3.8+ 与 Bash，不构建或启动服务 |
+| `make history-test` | 验证并发历史校验器能接受合法重叠、拒绝陈旧读取与实时顺序冲突，搜索超限明确失败；只需 Python 3.8+，不启动服务 |
 | `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及七个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
@@ -62,12 +63,28 @@ make docs-test
 | 实验汇总 | 完整计划与失败轮次、配置和日志序列对账、混合负载禁用操作的拒绝、资源进程身份、缺失值与多格式输出；搬移后的归档仍可只读复查 | [experiment_summary_test.py](../tests/experiment_summary_test.py) |
 | 快照离线分析 | 共同空闲窗口、预置与忙碌端点排除、覆盖门槛、旧字段缺失与真实零值、uint64 与累计倒退、最大值口径；保留无效轮次且不修改归档 | [experiment_snapshot_report_test.py](../tests/experiment_snapshot_report_test.py) |
 | 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、半关闭连接的发送背压、文件描述符耗尽后的接入恢复、1 MiB value、客户端 RST、非法帧、队列过载、停机丢弃未接纳输入并排空响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
+| 并发历史与恢复 | 对真实 HTTP PUT/GET/DELETE 的完整历史搜索合法串行顺序，同时满足响应值和调用间实时先后关系；把 SIGKILL 后读回的状态纳入同一历史 | [校验器](../tests/history_checker.py)、[校验器测试](../tests/history_checker_test.py)、[端到端测试](../tests/integration_test.py) |
 
 端到端测试还验证：可靠确认释放 worker，但继续占用请求名额；WAL 容量阻塞 worker、数据队列和网关 RPC 名额时，`/stats` 仍可返回；断连后旧请求不会释放名额供重连绕过限制；网络停机宽限结束后，异步回调仍能排空且数据可恢复。非法流水线帧后的未读输入不会截断之前的大 GET 响应，覆盖客户端保持写端开放和半关闭两种情况。引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
 
 启动检查对每项服务器参数分别验证：配置无效时不创建新数据目录，也不改动既有旧格式文件；导入命令仍忽略服务器专用参数。WAL 兼容测试中的固定文件来自 `6407aa7`，覆盖空日志与检查点后继续写入、删除及 NUL 值，不依赖当前编码器重新生成旧格式样本。
 
 这些检查分别验证具体并发交错、错误处理和恢复边界。进程退出测试不等同于真实断电测试；文件同步的持久性仍依赖操作系统、文件系统和设备履行 `fdatasync/fsync` 约定。已有回归检查也不代表已经测得性能提升。
+
+## 并发历史与重启验证
+
+`test_concurrent_history_and_recovery` 使用可靠模式、关闭逻辑数据容量限制，分别关闭自动快照和设为 1 ms。每种配置运行固定 seed `7`、`41`、`2026`：四个客户端各执行十次操作，竞争三个 key，包含覆盖、删除、正常未命中、空值、NUL、换行和中文。每个用例使用全新数据目录；seed 固定请求计划，并不固定线程调度。开启快照的用例还要求观察到自动快照成功、检查点序列大于 0，不据此指定快照与某个写操作的精确交错。
+
+客户端使用单调时钟记录调用区间及完整响应。校验器从空 KV 状态出发按 key 搜索：一个调用返回后才开始的调用必须排在其后，重叠调用可按任意顺序执行，但所有返回值必须与该顺序一致。它返回每个 key 的操作 ID 顺序作为见证；无法解释的响应、非法历史和搜索预算耗尽分别报错。按 key 分解适用于这里没有跨 key 操作和容量约束的模型，不能用于验证全局数据限额、事务或可靠 GET 的全局持久化屏障。
+
+四个客户端全部完成且在线历史通过后，测试向引擎发送 SIGKILL 并确认信号退出；重启引擎和网关，读取三个 key，将这些读取作为更晚的操作再次校验。这让并发覆盖和删除后的恢复状态也受同一历史约束。测试不会把调用失败或超时当作未执行并丢弃；任何此类结果都会失败，错误信息带有 seed、配置和完整已完成历史。它不覆盖崩溃时仍未完成的操作，也不等同于对所有并发执行的形式化证明。
+
+```sh
+make history-test
+python3 tests/integration_test.py -v MiniKVIntegration.test_concurrent_history_and_recovery
+```
+
+第二条命令需要已经构建引擎与网关。`make test` 包含校验器单测和真实服务历史测试；`make sanitize-test` 会对 sanitizer 引擎运行相同的真实服务历史测试。
 
 定位问题时可以单独运行测试。C++ 测试程序接受一个完整用例名称；可用名称见各文件末尾的测试列表。例如：
 

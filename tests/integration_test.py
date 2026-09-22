@@ -6,6 +6,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import random
 import resource
 import select
 import signal
@@ -18,6 +19,8 @@ import time
 import unittest
 import zlib
 from urllib.parse import urlencode
+
+from history_checker import Operation as HistoryOperation, check_history
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -708,6 +711,116 @@ class MiniKVIntegration(unittest.TestCase):
         self.start_gateway()
         for key, value in acknowledged.items():
             self.assertEqual(self.request("GET", key), (200, b"VALUE " + value.encode() + b"\n"))
+
+    def test_concurrent_history_and_recovery(self):
+        # Each case has an empty dataset and no global data-capacity constraint,
+        # so the checker may partition the completed history by key. Failed or
+        # timed-out calls are test failures, never silently omitted operations.
+        for snapshot_ms in (0, 1):
+            for seed in (7, 41, 2026):
+                with self.subTest(snapshot_ms=snapshot_ms, seed=seed):
+                    self.stop("gateway")
+                    self.stop("engine")
+                    self.engine_env.update({
+                        "MINIKV_DATA_DIR": str(Path(self.directory.name) /
+                                               f"history-{snapshot_ms}-{seed}"),
+                        "MINIKV_WAL_MODE": "reliable",
+                        "MINIKV_MAX_DATA_BYTES": "0",
+                        "MINIKV_WAL_FLUSH_MS": "5",
+                        "MINIKV_SNAPSHOT_INTERVAL_MS": str(snapshot_ms),
+                    })
+                    self.start_engine()
+                    self.start_gateway()
+                    before = self.runtime_stats()[1]["engine"]
+                    keys = ("hot", "empty", "unicode-键")
+                    workers, steps = 4, 10
+                    history, errors = [], []
+                    lock = threading.Lock()
+                    start = threading.Barrier(workers)
+                    stop_clients = threading.Event()
+
+                    def client(worker):
+                        rng = random.Random(seed * workers + worker)
+                        try:
+                            start.wait(timeout=5)
+                            for step in range(steps):
+                                if stop_clients.is_set():
+                                    return
+                                # The first three operations contend on one key;
+                                # the rest mix independent and conflicting keys.
+                                key = keys[0] if step < 3 else rng.choice(keys)
+                                method = ("PUT", "GET", "DELETE")[step] if step < 3 else rng.choice(
+                                    ("PUT", "GET", "DELETE"))
+                                value = None
+                                if method == "PUT":
+                                    value = "" if (worker + step) % 4 == 0 else f"{seed}:{worker}:{step}\x00\n值"
+                                started = time.monotonic_ns()
+                                status, body = self.request("POST" if method == "PUT" else method, key, value)
+                                finished = time.monotonic_ns()
+                                operation = HistoryOperation(worker * steps + step, method, key, value,
+                                                             started, finished, status, body)
+                                with lock:
+                                    history.append(operation)
+                        except Exception as error:
+                            with lock:
+                                errors.append((worker, repr(error)))
+                            stop_clients.set()
+                            start.abort()
+
+                    threads = [threading.Thread(target=client, args=(worker,)) for worker in range(workers)]
+                    try:
+                        for thread in threads:
+                            thread.start()
+                        deadline = time.monotonic() + 20
+                        for thread in threads:
+                            thread.join(timeout=max(0, deadline - time.monotonic()))
+                    finally:
+                        stop_clients.set()
+                        start.abort()
+                        for thread in threads:
+                            if thread.ident is not None:
+                                thread.join(timeout=5)
+                    self.assertFalse(any(thread.is_alive() for thread in threads), "history client did not finish")
+                    self.assertEqual(errors, [], f"client errors; completed history: {history!r}")
+                    self.assertEqual(len(history), workers * steps)
+                    history.sort(key=lambda operation: operation.id)
+                    self.assertTrue(any(left.key == right.key and left.started < right.finished and
+                                        right.started < left.finished
+                                        for index, left in enumerate(history) for right in history[index + 1:]),
+                                    f"no overlapping calls on the same key; history={history!r}")
+
+                    def verify():
+                        try:
+                            witness = check_history(history)
+                        except Exception as error:
+                            self.fail(f"history check failed: {error}; snapshot_ms={snapshot_ms}, "
+                                      f"seed={seed}; history={history!r}")
+                        self.assertEqual(set(witness), set(keys))
+                        self.assertEqual(sorted(identifier for order in witness.values() for identifier in order),
+                                         list(range(len(history))))
+
+                    # Check the online observations before adding recovery reads,
+                    # then solve again with the latter constrained after every
+                    # acknowledged operation. A different valid witness is fine.
+                    verify()
+                    if snapshot_ms:
+                        self.wait_stats(lambda stats: stats["engine"]["snapshot_successes_total"] >
+                                        before["snapshot_successes_total"] and
+                                        stats["engine"]["snapshot_sequence"] > 0,
+                                        "automatic snapshot did not checkpoint any workload operations")
+                    process = self.engine
+                    self.assertIsNone(process.poll())
+                    self.stop("engine", kill=True)
+                    self.assertEqual(process.returncode, -signal.SIGKILL)
+                    self.stop("gateway")
+                    self.start_engine()
+                    self.start_gateway()
+                    for key in keys:
+                        started = time.monotonic_ns()
+                        status, body = self.request("GET", key)
+                        history.append(HistoryOperation(len(history), "GET", key, None, started,
+                                                        time.monotonic_ns(), status, body))
+                    verify()
 
     def test_bounded_queue_reports_overload(self):
         self.stop("gateway")

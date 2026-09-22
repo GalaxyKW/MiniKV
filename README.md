@@ -156,6 +156,7 @@ make sanitize-test
 | 快照保留并发写入，失败可辨识 | 暂停快照、检查 WAL 后缀、短写/EFBIG、安装边界退出与重复恢复：[存储测试](tests/engine_test.cpp)、[快照测试](tests/snapshot_test.cpp) |
 | 数据容量限制不改变已接纳数据 | 精确字节边界、并发额度竞争、等待后重查、无副作用拒绝和恢复检查：[容量测试](tests/data_limit_test.cpp) |
 | HTTP、RPC 和两个进程协同工作 | 参数、超时、重试、分片、RST、过载、断连名额、SIGKILL 后恢复：[Go 测试](go_server/)、[端到端测试](tests/integration_test.py) |
+| 并发返回值和恢复状态能由同一历史解释 | 检查真实 PUT/GET/DELETE 调用区间、覆盖与删除结果，再加入 SIGKILL 重启后的读取：[历史校验与边界](docs/testing.md#并发历史与重启验证) |
 | 指标和实验报告可以信任 | 状态不改变提交语义；报告计数与 LSN 对账，保留失败与缺失轮次：[统计测试](tests/stats_test.cpp)、[实验测试](tests/experiment_test.py)、[汇总测试](tests/experiment_summary_test.py) |
 
 [CI](.github/workflows/ci.yml) 配置了这两组命令：普通回归包含 Go race 检查，sanitizer 回归使用 C++ AddressSanitizer / UndefinedBehaviorSanitizer。测试使用临时数据目录和本机临时端口；进程退出测试不等同于真实断电测试。单项检查、手动 ThreadSanitizer 和各测试的覆盖边界见[测试指南](docs/testing.md)。
