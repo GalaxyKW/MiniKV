@@ -13,7 +13,8 @@ import statistics
 import sys
 
 from experiment import (ExperimentError, arrival_metrics, benchmark_exit_code, fixed_arrival_settled, read_report, report_degraded,
-                        timestamp_ns, validate_arrival_config, validate_fixed_completion, validate_stats)
+                        timestamp_ns, validate_arrival_config, validate_data_capacity, validate_data_rejections,
+                        validate_fixed_completion, validate_stats)
 
 
 ROLES = ("engine", "gateway", "bench")
@@ -82,6 +83,8 @@ def manifest_for(directory):
     for name, bounds in limits.items():
         require(integer(args.get(name), *bounds), "invalid manifest argument: " + name)
     validate_arrival_config(args.get("rate", 0), args["requests"], (1 << 63) - 1)
+    require(integer(args.get("max_data_bytes", 0), maximum=(1 << 64) - 1),
+            "invalid manifest argument: max_data_bytes")
     for name in ("run_timeout", "startup_timeout", "shutdown_timeout", "settle_timeout"):
         value = args.get(name)
         require(type(value) in (int, float) and 0 < value <= sys.float_info.max, "invalid manifest timeout: " + name)
@@ -183,6 +186,8 @@ def config_for(root, manifest, case):
         "MINIKV_REQUEST_QUEUE_SIZE": "128", "MINIKV_MAX_CONNECTIONS": str(max(256, args["rpc_pool"] + 2)),
         "MINIKV_CLIENT_IDLE_MS": "30000",
     }
+    if args.get("max_data_bytes", 0):
+        expected_engine["MINIKV_MAX_DATA_BYTES"] = str(args["max_data_bytes"])
     expected_gateway = {"MINIKV_ENGINE_ADDR": "127.0.0.1:" + engine_port, "MINIKV_HTTP_ADDR": address,
                         "MINIKV_RPC_POOL_SIZE": str(args["rpc_pool"]), "MINIKV_RPC_TIMEOUT_MS": "2000"}
     require(engine == expected_engine and gateway == expected_gateway, "server configuration differs from manifest plan")
@@ -216,6 +221,7 @@ def invalidate_row(row):
 
 
 def validate_completion(root, manifest, case, result, report):
+    max_data_bytes = manifest["arguments"].get("max_data_bytes", 0)
     processes = result.get("processes")
     require(isinstance(processes, dict), "successful result lacks process exit evidence")
     for role in ROLES:
@@ -229,6 +235,7 @@ def validate_completion(root, manifest, case, result, report):
     for phase in ("before", "after", "settled"):
         body = load_json(safe_path(root, case["name"] + "/stats-" + phase + ".json"))
         validate_stats(body)
+        validate_data_capacity(body, max_data_bytes, initial=phase == "before")
         require(type(body.get("schema_version")) is int, "invalid stats schema type")
         workers, pool = body["server"].get("workers_capacity"), body["gateway"].get("rpc", {}).get("pool_capacity")
         require(body["engine"].get("wal_mode") == case["wal_mode"]
@@ -239,6 +246,9 @@ def validate_completion(root, manifest, case, result, report):
         bodies[phase] = body
     require(all(snapshots["before"][field] == 0 for field in ("keys", "applied_sequence", "durable_sequence", "wal_pending_bytes")),
             "startup stats do not describe an empty database")
+    validate_data_rejections(bodies["after"], bodies["settled"], report, max_data_bytes)
+    if max_data_bytes:
+        validate_capacity_samples(root, case, max_data_bytes, snapshots["settled"]["data_rejections_total"])
     if report["load_model"] == "fixed_arrival":
         validate_fixed_completion(bodies["after"], bodies["settled"], report, case["wal_mode"])
         validate_quiet_confirmation(root, case, result, bodies["settled"])
@@ -269,6 +279,22 @@ def read_samples(root, case, filename):
             sample = json.loads(line, parse_constant=reject_constant, parse_float=finite_float)
             require(isinstance(sample, dict), "invalid sampling record")
             yield sample
+
+
+def validate_capacity_samples(root, case, maximum, settled_rejections):
+    # A configured limit is part of run validity, so optional observation
+    # warnings must not swallow contradictory capacity evidence.
+    previous = 0
+    for sample in read_samples(root, case, "stats.jsonl"):
+        if sample.get("http_status") != 200:
+            continue
+        body = sample.get("body")
+        validate_data_capacity(body, maximum)
+        validate_stats(body)
+        rejections = body["engine"]["data_rejections_total"]
+        require(previous <= rejections <= settled_rejections,
+                "sampled data capacity rejections regressed or exceed settled stats")
+        previous = rejections
 
 
 def validate_quiet_confirmation(root, case, result, settled):

@@ -32,6 +32,7 @@ python3 benmark/experiment.py
 | 引擎数据线程 / 网关数据 RPC 池 | 4 / 32 |
 | Go 调度 | 网关和压测进程均使用 `GOMAXPROCS=4` |
 | WAL 提交 | 批量阈值 64；刷新间隔 2 ms |
+| 数据容量 | `--max-data-bytes 0`，默认不限额 |
 | 资源 / 状态周期采样 | 100 ms / 250 ms |
 | 单次压测超时 | 120 秒，包括数据预置和生成报告 |
 | 启动 / 关闭 / WAL 排空等待 | 每次启动等待 10 秒；每个进程关闭等待 15 秒；排空等待 10 秒 |
@@ -55,6 +56,23 @@ python3 benmark/experiment.py \
 ```sh
 python3 benmark/experiment.py --help
 ```
+
+## 数据容量配置
+
+`--max-data-bytes` 控制引擎的逻辑数据字节上限，范围为 0–2⁶⁴−1，默认 0 不限额。例如，在明确不会触顶的工作负载下观察启用容量检查的表现：
+
+```sh
+python3 benmark/experiment.py \
+  --output /tmp/minikv-data-capacity-experiment \
+  --modes reliable --repeats 3 --op put \
+  --requests 200000 --keyspace 1000 --value-size 128 \
+  --max-data-bytes 1048576
+python3 benmark/summarize.py /tmp/minikv-data-capacity-experiment
+```
+
+程序不会继承 shell 中的 `MINIKV_MAX_DATA_BYTES`。指定正上限后，会记录显式引擎环境，并在压测启动前确认 `/stats` 报告的容量等于配置，初始数据量与拒绝计数均为 0；旧引擎缺少这些字段或忽略配置时，该轮失败，不能被误当成启用了容量控制。后续状态样本与搬移后的离线汇总也检查配置、字段类型及容量关系。
+
+省略参数或指定 0 时，保留默认实验与旧版引擎、旧归档的兼容性。缺失的历史 `data_*` 字段不补成 0。正容量配置下的 BUSY 仍按真实 HTTP 503 计入请求失败；启用此参数不会把容量拒绝改算成功，也不会使预置失败变成有效测量。数据量是 key/value 字节之和，不是 RSS；具体定义见[数据集容量](design.md#数据集容量)。
 
 ## 固定到达率与过载
 

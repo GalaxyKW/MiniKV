@@ -61,7 +61,7 @@ class ExperimentSummaryTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
 
-    def experiment(self, name="experiment", seed=1, binary_version="A", rate=0):
+    def experiment(self, name="experiment", seed=1, binary_version="A", rate=0, max_data_bytes=0):
         directory = self.directory / name
         directory.mkdir()
         binaries = directory / "binaries"
@@ -87,6 +87,8 @@ class ExperimentSummaryTests(unittest.TestCase):
         }
         if rate:
             arguments["rate"] = rate
+        if max_data_bytes:
+            arguments["max_data_bytes"] = max_data_bytes
         manifest = {
             "schema_version": 1, "started_at": "2026-09-14T08:00:00Z", "arguments": arguments,
             "plan": [], "executables": executables,
@@ -165,6 +167,8 @@ class ExperimentSummaryTests(unittest.TestCase):
                         "MINIKV_HTTP_ADDR": "127.0.0.1:%d" % http_port,
                         "MINIKV_RPC_POOL_SIZE": "32", "MINIKV_RPC_TIMEOUT_MS": "2000"}},
                     "bench": {"argv": command, "environment": {}}}
+        if args.get("max_data_bytes", 0):
+            commands["engine"]["environment"]["MINIKV_MAX_DATA_BYTES"] = str(args["max_data_bytes"])
         save_json(run / "commands.json", commands)
         result = {
             "schema_version": 1, "name": name, "wal_mode": mode, "snapshot_interval_ms": interval,
@@ -222,6 +226,9 @@ class ExperimentSummaryTests(unittest.TestCase):
                                "wal_pending_bytes": 0, "snapshot_successes_total": 1 + (number if interval and snapshot_evidence else 0),
                                "snapshot_failures_total": 0, "snapshot_in_progress": False, "io_failed": False, "stopping": False},
                     "server": {"workers_capacity": 4}, "gateway": {"rpc": {"pool_capacity": 32}}}
+            if args.get("max_data_bytes", 0):
+                body["engine"].update(data_capacity_bytes=args["max_data_bytes"],
+                                      data_bytes=min(100, args["max_data_bytes"]), data_rejections_total=0)
             if args.get("rate", 0):
                 body["server"]["requests_inflight"] = 0
                 body["gateway"]["rpc"]["pool_in_use"] = 0
@@ -239,6 +246,8 @@ class ExperimentSummaryTests(unittest.TestCase):
         (run / "resources.jsonl").write_text("".join(json.dumps(sample) + "\n" for sample in resources))
         before = copy.deepcopy(stats[0]["body"])
         before["engine"].update(keys=0, applied_sequence=0, durable_sequence=0)
+        if args.get("max_data_bytes", 0):
+            before["engine"]["data_bytes"] = 0
         save_json(run / "stats-before.json", before)
         save_json(run / "stats-after.json", stats[-1]["body"])
         save_json(run / "stats-settled.json", stats[-1]["body"])
@@ -722,6 +731,179 @@ class ExperimentSummaryTests(unittest.TestCase):
                 summary = self.invoke([directory], expected=1)
                 self.assertEqual(summary["counts"]["valid"], 1)
                 self.assertNotEqual(summary["experiments"][0]["groups"][0]["runs"][0]["status"], "valid")
+
+    def test_data_capacity_positive_and_legacy_archives_remain_valid(self):
+        for maximum in (0, 1, (1 << 64) - 1):
+            for rate in (0, 100):
+                with self.subTest(maximum=maximum, rate=rate):
+                    directory = self.experiment("capacity-%d-%d" % (maximum, rate),
+                                                rate=rate, max_data_bytes=maximum)
+                    run = self.add_run(directory)
+                    if not maximum:
+                        manifest = json.loads((directory / "manifest.json").read_text())
+                        self.assertNotIn("max_data_bytes", manifest["arguments"])
+                        self.assertNotIn("data_bytes", json.loads((run / "stats-before.json").read_text())["engine"])
+                        self.assertEqual(self.invoke([directory])["counts"]["valid"], 2)
+                        manifest["arguments"]["max_data_bytes"] = 0
+                        save_json(directory / "manifest.json", manifest)
+                        if not rate:
+                            (run / "stats.jsonl").unlink()
+                    else:
+                        samples = [json.loads(line) for line in (run / "stats.jsonl").read_text().splitlines()]
+                        # Transient transport failures carry no capacity evidence.
+                        samples.insert(1, {"http_status": None, "body": None, "error": "connection timeout"})
+                        (run / "stats.jsonl").write_text("".join(json.dumps(sample) + "\n" for sample in samples))
+                    self.assertEqual(self.invoke([directory])["counts"]["valid"], 2)
+
+    def test_data_capacity_manifest_is_strict_uint64(self):
+        for number, value in enumerate((None, True, False, -1, 1.0, "1", 1 << 64)):
+            with self.subTest(value=value):
+                directory = self.experiment("capacity-manifest-%d" % number)
+                self.add_run(directory)
+                manifest = json.loads((directory / "manifest.json").read_text())
+                manifest["arguments"]["max_data_bytes"] = value
+                save_json(directory / "manifest.json", manifest)
+                self.assertIn("max_data_bytes", self.invoke([directory], expected=2).stderr)
+
+    def test_data_capacity_command_environment_must_match_manifest(self):
+        for fault in ("missing", "wrong", "numeric", "unrequested"):
+            with self.subTest(fault=fault):
+                directory = self.experiment("capacity-env-" + fault, max_data_bytes=0 if fault == "unrequested" else 100)
+                run = self.add_run(directory)
+                commands = json.loads((run / "commands.json").read_text())
+                environment = commands["engine"]["environment"]
+                if fault == "missing":
+                    del environment["MINIKV_MAX_DATA_BYTES"]
+                else:
+                    environment["MINIKV_MAX_DATA_BYTES"] = 100 if fault == "numeric" else "101"
+                save_json(run / "commands.json", commands)
+                row = self.invoke([directory], expected=1)["experiments"][0]["groups"][0]["runs"][0]
+                self.assertEqual(row["status"], "invalid")
+                self.assertIn("server configuration", " ".join(row["errors"]))
+
+    def test_data_capacity_boundary_evidence_cannot_be_missing_or_contradictory(self):
+        faults = (("data_capacity_bytes", None), ("data_capacity_bytes", 0),
+                  ("data_bytes", None), ("data_bytes", True), ("data_bytes", 101),
+                  ("data_rejections_total", None), ("data_rejections_total", False),
+                  ("data_rejections_total", -1), ("data_rejections_total", 1 << 64),
+                  ("data_rejections_total", 1))
+        for phase in ("before", "after", "settled"):
+            for number, (field, value) in enumerate(faults):
+                with self.subTest(phase=phase, field=field, value=value):
+                    directory = self.experiment("capacity-boundary-%s-%d" % (phase, number), max_data_bytes=100)
+                    run = self.add_run(directory)
+                    path = run / ("stats-" + phase + ".json")
+                    body = json.loads(path.read_text())
+                    if value is None:
+                        del body["engine"][field]
+                    else:
+                        body["engine"][field] = value
+                    save_json(path, body)
+                    row = self.invoke([directory], expected=1)["experiments"][0]["groups"][0]["runs"][0]
+                    self.assertEqual(row["status"], "invalid")
+                    self.assertIsNone(row["qps_successful"])
+                    self.assertIn("data capacity", " ".join(row["errors"]))
+        directory = self.experiment("capacity-nonempty-startup", max_data_bytes=100)
+        run = self.add_run(directory)
+        body = json.loads((run / "stats-before.json").read_text())
+        body["engine"]["data_bytes"] = 1
+        save_json(run / "stats-before.json", body)
+        row = self.invoke([directory], expected=1)["experiments"][0]["groups"][0]["runs"][0]
+        self.assertIn("startup data capacity", " ".join(row["errors"]))
+
+    def test_data_capacity_raw_evidence_is_required_even_when_observations_ignore_errors(self):
+        for fault in ("missing_file", "wrong_capacity", "oversized", "missing_field", "boolean_counter",
+                      "unreported_rejection", "error_hides_bad_capacity", "error_hides_missing_body"):
+            with self.subTest(fault=fault):
+                directory = self.experiment("capacity-raw-" + fault, max_data_bytes=100)
+                run = self.add_run(directory)
+                path = run / "stats.jsonl"
+                if fault == "missing_file":
+                    path.unlink()
+                else:
+                    samples = [json.loads(line) for line in path.read_text().splitlines()]
+                    sample = samples[0]
+                    engine = sample["body"]["engine"]
+                    if fault in ("wrong_capacity", "error_hides_bad_capacity"):
+                        engine["data_capacity_bytes"] = 99
+                    elif fault == "oversized":
+                        engine["data_bytes"] = 101
+                    elif fault == "missing_field":
+                        del engine["data_bytes"]
+                    elif fault == "boolean_counter":
+                        engine["data_rejections_total"] = False
+                    elif fault == "unreported_rejection":
+                        engine["data_rejections_total"] = 1
+                    else:
+                        sample["body"] = None
+                    if fault.startswith("error_hides_"):
+                        sample["error"] = "invalid stats response"
+                    path.write_text("".join(json.dumps(sample) + "\n" for sample in samples))
+                row = self.invoke([directory], expected=1)["experiments"][0]["groups"][0]["runs"][0]
+                self.assertIn(row["status"], ("invalid", "missing"))
+                self.assertIsNone(row["qps_successful"])
+                self.assertTrue(row["errors"])
+
+    def test_data_capacity_does_not_reclassify_unmeasured_runs(self):
+        for status, expected in (("failed", "failed"), ("interrupted", "interrupted"), ("running", "incomplete")):
+            with self.subTest(status=status):
+                directory = self.experiment("capacity-status-" + status, max_data_bytes=100)
+                run = self.add_run(directory, status=status)
+                for name in ("stats.jsonl", "stats-before.json", "stats-after.json", "stats-settled.json"):
+                    (run / name).unlink()
+                row = self.invoke([directory], expected=1)["experiments"][0]["groups"][0]["runs"][0]
+                self.assertEqual(row["status"], expected)
+                self.assertEqual(row["errors"], ["fixture " + status])
+                self.assertIsNone(row["qps_successful"])
+
+    def test_data_capacity_fixed_arrival_rejections_preserve_degraded_measurements(self):
+        for fault in (None, "after_regresses", "unreported", "sample_regresses", "sample_exceeds_settled"):
+            with self.subTest(fault=fault):
+                directory = self.experiment("capacity-fixed-" + str(fault), rate=100, max_data_bytes=100)
+                run = self.add_run(directory)
+                report = json.loads((run / "report.json").read_text())
+                report["outcomes"].update(successes=97, failures=3, http_failures=3)
+                report["http_statuses"] = {"200": 97, "503": 3}
+                report.update(qps_successful=97, system_success_rate_pct=97, offered_success_rate_pct=97)
+                save_json(run / "report.json", report)
+                result = json.loads((run / "result.json").read_text())
+                result["status"] = "degraded"
+                result["processes"]["bench"]["returncode"] = 1
+                save_json(run / "result.json", result)
+                for phase, rejections in (("after", 1), ("settled", 2)):
+                    path = run / ("stats-" + phase + ".json")
+                    body = json.loads(path.read_text())
+                    if fault == "after_regresses" and phase == "after":
+                        rejections = 3
+                    if fault == "unreported" and phase == "settled":
+                        rejections = 4
+                    # Three failed PUTs do not append WAL records.
+                    body["engine"].update(applied_sequence=32, durable_sequence=32, data_rejections_total=rejections)
+                    save_json(path, body)
+                path = run / "stats.jsonl"
+                samples = [json.loads(line) for line in path.read_text().splitlines()][:2]
+                for number, sample in enumerate(samples):
+                    sample["body"]["engine"].update(applied_sequence=32, durable_sequence=32,
+                                                     data_rejections_total=number + 1)
+                if fault == "sample_regresses":
+                    samples[0]["body"]["engine"]["data_rejections_total"] = 2
+                    samples[1]["body"]["engine"]["data_rejections_total"] = 1
+                elif fault == "sample_exceeds_settled":
+                    samples[0]["body"]["engine"]["data_rejections_total"] = 3
+                path.write_text("".join(json.dumps(sample) + "\n" for sample in samples))
+                save_quiet_confirmation(run)
+                group = self.invoke([directory], expected=1)["experiments"][0]["groups"][0]
+                row = group["runs"][0]
+                if fault:
+                    self.assertEqual(row["status"], "invalid")
+                    self.assertIn("data capacity", " ".join(row["errors"]))
+                    self.assertEqual(group["distributions"]["qps_successful"]["n"], 0)
+                else:
+                    self.assertEqual(row["status"], "degraded")
+                    self.assertEqual(row["qps_successful"], 97)
+                    self.assertEqual(row["failures"], 3)
+                    self.assertFalse(row["snapshot_comparison_eligible"])
+                    self.assertEqual(group["distributions"]["qps_successful"]["n"], 1)
 
     def test_stats_sequences_must_account_for_preload_puts_and_deletes(self):
         faults = ("old_run", "before_applied", "before_keys", "before_durable", "before_pending", "after_missing_delete",

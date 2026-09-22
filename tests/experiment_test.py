@@ -13,10 +13,13 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "benmark" / "experiment.py"
+sys.path.insert(0, str(ROOT / "benmark"))
+import experiment
 
 # Real child processes exercise subprocess lifetime, OS ports and output files.
 # A fixture file supplies failure modes without requiring custom environment
@@ -67,7 +70,8 @@ if role == "engine":
              "workers": int(os.environ.get("MINIKV_WORKERS", "20")),
              "queue": int(os.environ.get("MINIKV_REQUEST_QUEUE_SIZE", "128")),
              "connections": int(os.environ.get("MINIKV_MAX_CONNECTIONS", "256")),
-             "wal_queue": int(os.environ.get("MINIKV_WAL_QUEUE_BYTES", "16777216"))}
+             "wal_queue": int(os.environ.get("MINIKV_WAL_QUEUE_BYTES", "16777216")),
+             "data_capacity": os.environ.get("MINIKV_MAX_DATA_BYTES")}
     (fixtures / ("engine-" + str(address[1]) + ".json")).write_text(json.dumps(state))
     with socket.socket() as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -118,6 +122,15 @@ elif role == "gateway":
                     "exchange_errors_total": 0, "exchange_duration_ns_total": 0,
                 }},
             }
+            if state["data_capacity"] is not None and not control.get("omit_data_stats"):
+                payload["engine"].update(data_capacity_bytes=int(state["data_capacity"]), data_bytes=0, data_rejections_total=0)
+                payload["engine"].update(control.get("data_stats", {}))
+                if (fixtures / ("benchmark-started-" + port)).exists():
+                    payload["engine"].update(control.get("data_stats_after", {}))
+                    for field in control.get("missing_data_stats_after", []):
+                        payload["engine"].pop(field, None)
+                for field in control.get("missing_data_stats", []):
+                    payload["engine"].pop(field, None)
             fixed_path = fixtures / ("fixed-report-" + port + ".json")
             if fixed_path.exists():
                 fixed = json.loads(fixed_path.read_text())
@@ -353,6 +366,105 @@ class ExperimentRunnerTests(unittest.TestCase):
         self.assertEqual(marker.read_text(), "existing user experiment\n")
         self.assertEqual(sorted(path.name for path in self.output.iterdir()), ["manifest.json"])
         self.assertEqual(self.pid_records(), [])
+
+    def test_invalid_data_capacity_is_rejected_before_creating_artifacts(self):
+        for value in ("-1", str(2**64), "1.5", "nan", "true"):
+            with self.subTest(value=value):
+                self.invoke(extra=("--max-data-bytes", value), expected=2)
+                self.assertFalse(self.output.exists())
+                self.assertEqual(self.pid_records(), [])
+
+    def test_data_capacity_boundaries_and_environment_isolation(self):
+        for number, capacity in enumerate((None, 0, 1, 2**64 - 1)):
+            with self.subTest(capacity=capacity):
+                self.output = self.directory / ("capacity-%d" % number)
+                extra = () if capacity is None else ("--max-data-bytes", str(capacity))
+                with mock.patch.dict(os.environ, {"MINIKV_MAX_DATA_BYTES": "17"}):
+                    self.invoke(extra=extra, expected=0)
+                manifest = json.loads((self.output / "manifest.json").read_text())
+                if capacity:
+                    self.assertEqual(manifest["arguments"]["max_data_bytes"], capacity)
+                else:
+                    self.assertNotIn("max_data_bytes", manifest["arguments"])
+                for run in self.output.glob("r*"):
+                    commands = json.loads((run / "commands.json").read_text())
+                    engine_env = commands["engine"]["environment"]
+                    expected = str(capacity) if capacity else None
+                    self.assertEqual(engine_env.get("MINIKV_MAX_DATA_BYTES"), expected)
+                    state = json.loads((self.fixtures / ("engine-" + engine_env["MINIKV_ENGINE_PORT"] + ".json")).read_text())
+                    self.assertEqual(state["data_capacity"], expected, "child inherited ambient capacity")
+                    self.assertNotIn("MINIKV_MAX_DATA_BYTES", commands["runtime_environment"])
+                    self.assertNotIn("MINIKV_MAX_DATA_BYTES", commands["gateway"]["environment"])
+                    self.assertNotIn("max_data_bytes", json.loads((run / "report.json").read_text())["config"])
+                    if not capacity:
+                        self.assertNotIn("data_capacity_bytes", json.loads((run / "stats-before.json").read_text())["engine"])
+
+    def test_data_capacity_stats_require_unsigned_integer_fields(self):
+        valid = {"data_capacity_bytes": 8, "data_bytes": 0, "data_rejections_total": 0}
+        experiment.validate_data_capacity({}, 0)
+        experiment.validate_data_capacity({"engine": valid}, 8, initial=True)
+        for field in valid:
+            for value in (None, True, -1, 1.0, "1", 2**64):
+                with self.subTest(field=field, value=value):
+                    body = {"engine": dict(valid, **{field: value})}
+                    with self.assertRaises(experiment.ExperimentError):
+                        experiment.validate_data_capacity(body, 8)
+            body = {"engine": dict(valid)}
+            del body["engine"][field]
+            with self.assertRaises(experiment.ExperimentError):
+                experiment.validate_data_capacity(body, 8)
+
+    def test_requested_capacity_must_be_confirmed_before_benchmark_starts(self):
+        cases = ({"omit_data_stats": True}, {"missing_data_stats": ["data_bytes"]},
+                 {"data_stats": {"data_capacity_bytes": 0}}, {"data_stats": {"data_capacity_bytes": True}},
+                 {"data_stats": {"data_bytes": 1}}, {"data_stats": {"data_rejections_total": 1}})
+        for number, control in enumerate(cases):
+            with self.subTest(control=control):
+                self.output = self.directory / ("ignored-capacity-%d" % number)
+                self.invoke(control=control, extra=("--max-data-bytes", "1024"), expected=1)
+                self.assertFalse(any(record["role"] == "bench" for record in self.pid_records()))
+                index = json.loads((self.output / "index.json").read_text())
+                self.assertEqual(index["status"], "complete")
+                for result in index["runs"]:
+                    self.assertEqual(result["status"], "failed")
+                    self.assertTrue(any("data capacity" in error for error in result["errors"]))
+                    self.assertTrue((self.output / result["name"] / "stats-before.json").is_file())
+
+    def test_capacity_changes_and_unreported_rejections_fail_the_run(self):
+        cases = (({"data_stats_after": {"data_capacity_bytes": 1023}}, ()),
+                 ({"missing_data_stats_after": ["data_capacity_bytes"]}, ()),
+                 ({"data_stats_after": {"data_bytes": 1025}}, ("--stats-ms", "0")),
+                 ({"data_stats_after": {"data_rejections_total": 1}}, ("--stats-ms", "0")))
+        for number, (control, extra) in enumerate(cases):
+            with self.subTest(control=control):
+                self.output = self.directory / ("changed-capacity-%d" % number)
+                self.invoke(control=control, extra=("--max-data-bytes", "1024") + extra, expected=1)
+                index = json.loads((self.output / "index.json").read_text())
+                for result in index["runs"]:
+                    self.assertEqual(result["status"], "failed")
+                    self.assertTrue(any("data capacity" in error for error in result["errors"]))
+                    run = self.output / result["name"]
+                    samples = [json.loads(line) for line in (run / "stats.jsonl").read_text().splitlines()]
+                    if "missing_data_stats_after" in control:
+                        self.assertTrue(any(sample["http_status"] == 200 and "data_capacity_bytes" not in sample["body"]["engine"]
+                                            for sample in samples))
+                    else:
+                        self.assertTrue(any(sample["body"]["engine"].get(field) == value
+                                            for field, value in control["data_stats_after"].items() for sample in samples))
+                    if not extra:
+                        self.assertFalse((run / "stats-after.json").exists(), "periodic capacity error was ignored until completion")
+
+    def test_accounted_capacity_rejections_preserve_degraded_fixed_results(self):
+        self.invoke(control={"service_failures": 1, "committed_writes": 8,
+                             "data_stats_after": {"data_rejections_total": 1}},
+                    extra=("--max-data-bytes", "1024", "--rate", "100", "--op", "put"), expected=1)
+        index = json.loads((self.output / "index.json").read_text())
+        self.assertEqual(index["degraded_runs"], 2)
+        self.assertEqual(index["failed_runs"], 0)
+        for result in index["runs"]:
+            self.assertEqual(result["status"], "degraded")
+            self.assertEqual(result["errors"], [])
+            self.assertEqual(result["metrics"]["failures"], 1)
 
     def test_matrix_keeps_reports_logs_stats_and_private_data_separate(self):
         self.invoke(extra=("--modes", "throughput,reliable"), expected=0)

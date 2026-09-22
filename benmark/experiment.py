@@ -22,6 +22,7 @@ from experiment_support import collect_metadata, sample_process
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_DURATION_NS = (1 << 63) - 1
+MAX_UINT64 = (1 << 64) - 1
 INTERRUPT_STATE = {"launching": False, "pending": None}
 
 
@@ -137,6 +138,8 @@ def parse_args(argv):
     parser.add_argument("--gomaxprocs", type=integer(1, 1024), default=4)
     parser.add_argument("--wal-batch", type=integer(1, 65536), default=64)
     parser.add_argument("--wal-flush-ms", type=integer(1, 60000), default=2)
+    parser.add_argument("--max-data-bytes", type=integer(0, MAX_UINT64), default=0,
+                        help="engine live key/value byte capacity; 0 keeps the unlimited default")
     parser.add_argument("--snapshot-ms", type=integer(1, 86400000), default=1000,
                         help="enabled snapshot interval; every mode also runs with snapshots disabled")
     parser.add_argument("--sample-ms", type=integer(0, 60000), default=100,
@@ -203,6 +206,8 @@ def configuration(args, directory, mode, interval):
         "MINIKV_WORKERS": str(args.engine_workers), "MINIKV_REQUEST_QUEUE_SIZE": "128",
         "MINIKV_MAX_CONNECTIONS": str(max(256, args.rpc_pool + 2)), "MINIKV_CLIENT_IDLE_MS": "30000",
     }
+    if args.max_data_bytes:
+        engine["MINIKV_MAX_DATA_BYTES"] = str(args.max_data_bytes)
     gateway = {"MINIKV_ENGINE_ADDR": f"127.0.0.1:{engine_port}",
                "MINIKV_HTTP_ADDR": f"127.0.0.1:{http_port}", "MINIKV_RPC_POOL_SIZE": str(args.rpc_pool),
                "MINIKV_RPC_TIMEOUT_MS": "2000"}
@@ -268,6 +273,29 @@ def validate_stats(body):
             raise ExperimentError(f"invalid stats field: {field}")
     if engine["snapshot_failures_total"]:
         raise ExperimentError("a snapshot failed during this experiment")
+
+
+def validate_data_capacity(body, maximum, initial=False):
+    # Older engines and archives need not provide these additive stats when no
+    # capacity was requested. Positive limits must be proved by the running engine.
+    if not maximum:
+        return
+    engine = body.get("engine") if isinstance(body, dict) else None
+    if not isinstance(engine, dict):
+        raise ExperimentError("missing data capacity stats")
+    for name in ("data_capacity_bytes", "data_bytes", "data_rejections_total"):
+        if type(engine.get(name)) is not int or not 0 <= engine[name] <= MAX_UINT64:
+            raise ExperimentError("invalid data capacity stats field: " + name)
+    if engine["data_capacity_bytes"] != maximum or engine["data_bytes"] > maximum:
+        raise ExperimentError("data capacity stats do not match the configured limit")
+    if initial and (engine["data_bytes"] != 0 or engine["data_rejections_total"] != 0):
+        raise ExperimentError("startup data capacity stats do not describe an unused empty database")
+
+
+def validate_data_rejections(after, settled, report, maximum):
+    if maximum and not (after["engine"]["data_rejections_total"] <= settled["engine"]["data_rejections_total"]
+                        <= report["outcomes"]["failures"]):
+        raise ExperimentError("data capacity rejections contradict benchmark failures")
 
 
 def wait_ready(processes, engine_port, http_port, timeout):
@@ -531,6 +559,17 @@ def run_case(args, name, mode, interval):
     processes, logs = {}, []
     report = None
     interrupted = False
+    previous_data_rejections = 0
+
+    def check_data_capacity(body, initial=False):
+        nonlocal previous_data_rejections
+        validate_data_capacity(body, args.max_data_bytes, initial)
+        if args.max_data_bytes:
+            current = body["engine"]["data_rejections_total"]
+            if current < previous_data_rejections:
+                raise ExperimentError("data capacity rejection counter decreased")
+            previous_data_rejections = current
+
     try:
         engine_env, gateway_env, expected, command, engine_port, http_port = configuration(args, directory, mode, interval)
         base_env = runtime_environment(args)
@@ -572,6 +611,7 @@ def run_case(args, name, mode, interval):
         launch("gateway", [str(args.gateway)], gateway_env, "gateway.log")
         before = wait_ready(processes, engine_port, http_port, args.startup_timeout)
         write_json(directory / "stats-before.json", before["body"])
+        check_data_capacity(before["body"], initial=True)
         engine = before["body"]["engine"]
         if engine["keys"] != 0 or engine["applied_sequence"] != 0 or engine.get("wal_mode") != mode:
             raise ExperimentError("startup stats do not describe the requested empty database and WAL mode")
@@ -594,7 +634,10 @@ def run_case(args, name, mode, interval):
                                             "processes": {role: sample_process(process.pid) for role, process in processes.items()}})
                     next_resource = time.monotonic() + args.sample_ms / 1000
                 if args.stats_ms and now >= next_stats:
-                    append_json(stats, fetch_stats(http_port, min(1, max(.001, deadline - time.monotonic()))))
+                    sample = fetch_stats(http_port, min(1, max(.001, deadline - time.monotonic())))
+                    append_json(stats, sample)
+                    if sample["http_status"] == 200:
+                        check_data_capacity(sample["body"])
                     next_stats = time.monotonic() + args.stats_ms / 1000
                 time.sleep(.01)
             processes["bench"].wait()
@@ -603,6 +646,7 @@ def run_case(args, name, mode, interval):
             write_json(directory / "stats-after.json", after["body"])
             if after["error"]:
                 raise ExperimentError("post-benchmark stats: " + after["error"])
+            check_data_capacity(after["body"])
             check_alive(processes)
             report = read_report(directory / "report.json", expected)
             if processes["bench"].returncode != benchmark_exit_code(report):
@@ -640,10 +684,12 @@ def run_case(args, name, mode, interval):
                 append_json(stats, settled)
                 if settled["error"]:
                     raise ExperimentError("WAL drain stats: " + settled["error"])
+                check_data_capacity(settled["body"])
             result["wal_drain_elapsed_ns"] = int((time.monotonic() - settle_start) * 1000000000)
             if args.rate:
                 validate_fixed_completion(after["body"], settled["body"], report, mode)
             write_json(directory / "stats-settled.json", settled["body"])
+            validate_data_rejections(after["body"], settled["body"], report, args.max_data_bytes)
         result["observations"] = observations(directory, report, interval)
         result["metrics"] = {"qps_successful": report["qps_successful"], "p99_ns": report["latency_ns"]["p99"],
                              "failures": report["outcomes"]["failures"], "logical_misses": report["outcomes"]["logical_misses"]}
@@ -708,7 +754,7 @@ def main(argv=None):
                 name = f"r{repeat + 1:02d}-{mode}-snapshot-{'on' if interval else 'off'}"
                 plan.append({"name": name, "wal_mode": mode, "snapshot_interval_ms": interval})
         manifest = {"schema_version": 1, "started_at": utc_now(), "arguments": {key: str(value) if isinstance(value, Path) else value
-                     for key, value in vars(args).items() if key != "rate" or value}, "plan": plan, "runtime_environment": runtime_environment(args),
+                     for key, value in vars(args).items() if key not in ("rate", "max_data_bytes") or value}, "plan": plan, "runtime_environment": runtime_environment(args),
                     "metadata": collect_metadata(ROOT, {name: getattr(args, name) for name in ("engine", "gateway", "bench")})}
         write_json(args.output / "manifest.json", manifest)
         write_json(args.output / "index.json", index)
