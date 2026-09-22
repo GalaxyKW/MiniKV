@@ -12,12 +12,14 @@
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <linux/sockios.h>
 #include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <unordered_map>
@@ -60,6 +62,7 @@ struct Client {
     bool registered = false;
     bool busy = false;
     bool close_after_write = false;
+    bool write_shutdown = false;
     Clock::time_point active = Clock::now();
 };
 
@@ -252,16 +255,27 @@ private:
                 if (id == 2) { finish_requests(); continue; }
                 if (clients_.find(id) == clients_.end()) continue;
                 const auto flags = events[i].events;
-                if (flags & (EPOLLERR | EPOLLHUP)) { close_client(id); continue; }
-                if (!draining_ && (flags & (EPOLLIN | EPOLLRDHUP))) read_client(id);
+                if ((flags & EPOLLERR) || ((flags & EPOLLHUP) && !clients_.at(id).write_shutdown)) {
+                    close_client(id);
+                    continue;
+                }
+                if (flags & (EPOLLIN | EPOLLRDHUP | EPOLLHUP)) {
+                    if (clients_.at(id).write_shutdown) drain_client_input(id);
+                    else if (!draining_) read_client(id);
+                }
                 if (clients_.find(id) != clients_.end() && !clients_.at(id).output.empty()) write_client(id);
             }
             const auto now = Clock::now();
             std::vector<uint64_t> expired;
+            std::vector<uint64_t> closing;
             for (const auto& entry : clients_) {
                 if (!draining_ && now - entry.second.active >= idle_timeout_) expired.push_back(entry.first);
+                else if (entry.second.write_shutdown) closing.push_back(entry.first);
             }
             for (auto id : expired) close_client(id);
+            // ACKs alone need not wake EPOLLIN. Recheck the send queue on the
+            // existing reactor tick, under the same overall shutdown deadline.
+            for (auto id : closing) drain_client_input(id);
         }
     }
 
@@ -294,7 +308,9 @@ private:
         listen_fd_ = -1;
         for (auto it = clients_.begin(); it != clients_.end();) {
             const auto current = it++;
-            if (!current->second.busy && current->second.output.empty()) close_client(current->first);
+            if (!current->second.busy && current->second.output.empty() && !current->second.write_shutdown) {
+                begin_client_shutdown(current->first);
+            }
         }
     }
 
@@ -469,11 +485,55 @@ private:
             client.active = Clock::now();
         }
         client.output.clear();
-        if (draining_ || stopping.load(std::memory_order_relaxed) || client.close_after_write) {
+        if (draining_ || stopping.load(std::memory_order_relaxed)) {
+            begin_client_shutdown(id);
+            return;
+        }
+        if (client.close_after_write) {
             close_client(id);
             return;
         }
         if (!dispatch(id)) arm(id, EPOLLIN);
+    }
+
+    void begin_client_shutdown(uint64_t id) {
+        auto& client = clients_.at(id);
+        // An empty user output buffer does not mean the peer received it.
+        // close() with unread pipelined input sends RST on Linux and can discard
+        // bytes send() queued in TCP. Queue FIN, then discard unadmitted input.
+        if (::shutdown(client.fd, SHUT_WR) != 0) { close_client(id); return; }
+        client.write_shutdown = true;
+        client.input.clear();
+        arm(id, EPOLLIN);
+        if (clients_.find(id) != clients_.end()) drain_client_input(id);
+    }
+
+    void drain_client_input(uint64_t id) {
+        auto& client = clients_.at(id);
+        std::array<char, 8192> buffer{};
+        // Keep a continuously sending peer from monopolizing the reactor or
+        // extending the single five-second network grace period.
+        for (size_t discarded = 0; discarded < 64 * 1024;) {
+            if (draining_ && Clock::now() >= shutdown_deadline_) return;
+            const ssize_t count = ::recv(client.fd, buffer.data(), buffer.size(), 0);
+            if (count > 0) { discarded += static_cast<size_t>(count); continue; }
+            if (count == 0) {
+                // EOF proves all peer input was consumed. Orderly close then
+                // retains queued output in TCP; peer EOF is not an output ACK.
+                close_client(id);
+                return;
+            }
+            if (errno == EINTR) continue;
+            if (errno != EAGAIN && errno != EWOULDBLOCK) { close_client(id); return; }
+            // Linux tcp_ioctl(SIOCOUTQ) uses write_seq - snd_una: unlike
+            // SIOCOUTQNSD, this includes sent but unacknowledged data and FIN.
+            // With input drained, zero means no response output can be lost by
+            // close, even if a pooled client keeps its write side open. Failure
+            // to inspect the queue waits for EOF or the existing deadline.
+            int queued = -1;
+            if (::ioctl(client.fd, SIOCOUTQ, &queued) == 0 && queued == 0) close_client(id);
+            return;
+        }
     }
 
     void finish_requests() {

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import resource
 import select
+import signal
 import socket
 import struct
 import subprocess
@@ -655,6 +656,82 @@ class MiniKVIntegration(unittest.TestCase):
                     pass  # A request that was not admitted may be disconnected.
             self.assertGreater(acknowledged, 0, "shutdown discarded all admitted responses")
         self.stop("engine")
+
+    def test_shutdown_drains_pipelined_input_before_closing_slow_response(self):
+        for half_close, queued_reply in ((False, False), (True, False), (False, True)):
+            with self.subTest(half_close=half_close, queued_reply=queued_reply):
+                self.check_shutdown_pipelined_response(half_close, queued_reply)
+
+    def check_shutdown_pipelined_response(self, half_close, queued_reply):
+        self.stop("gateway")
+        self.stop("engine")
+        self.engine_env.update({"MINIKV_WAL_MODE": "throughput", "MINIKV_SNAPSHOT_INTERVAL_MS": "0"})
+        self.start_engine()
+        self.start_gateway()
+        value = b"v" * (1024 * 1024)
+        self.assertEqual(self.request("POST", "shutdown-large", value.decode()), (200, b"OK\n"))
+        with socket.socket() as sock:
+            sock.settimeout(3)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+            sock.connect(("127.0.0.1", self.engine_port))
+            if queued_reply:
+                sock.sendall(frame(2, b"shutdown-large"))
+                stats = self.wait_stats(lambda s: s["server"]["requests_started_total"] == 2 and
+                                        s["server"]["requests_inflight"] == 0,
+                                        "single reply did not reach the socket output buffer")
+                # Freeze an idle reactor before putting more input in the kernel,
+                # so shutdown must preserve a reply already handed to send().
+                self.engine.send_signal(signal.SIGSTOP)
+                try:
+                    deadline = time.monotonic() + 2
+                    while "State:\tT" not in Path(f"/proc/{self.engine.pid}/status").read_text():
+                        self.assertLess(time.monotonic(), deadline, "reactor did not stop")
+                        time.sleep(0.005)
+                    sock.sendall(frame(2, b"shutdown-large") * 700 + frame(1, b"shutdown-unadmitted", b"bad"))
+                    self.engine.terminate()
+                finally:
+                    self.engine.send_signal(signal.SIGCONT)
+                admitted_reads = 1
+                applied_sequence = stats["engine"]["applied_sequence"]
+            else:
+                admitted_reads, applied_sequence = self.stop_with_pipelined_response(sock, half_close)
+            time.sleep(0.05)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+            for _ in range(admitted_reads):
+                self.assertEqual(read_response(sock), (1, value))
+            self.assertEqual(sock.recv(1), b"", "shutdown submitted another pipelined request")
+            # A pooled RPC connection need not close its write side after reading
+            # a reply. Acknowledged output must allow prompt server shutdown.
+            self.engine.wait(timeout=2)
+        self.stop("engine")
+        self.start_engine()
+        with self.rpc_socket() as recovered:
+            recovered.sendall(frame(2, b"shutdown-unadmitted") + frame(4, b""))
+            self.assertEqual(read_response(recovered), (2, b""))
+            self.assertEqual(json.loads(read_response(recovered)[1])["engine"]["applied_sequence"], applied_sequence)
+
+    def stop_with_pipelined_response(self, sock, half_close):
+        # Leave unadmitted requests in both user and kernel receive buffers.
+        # The terminal PUT must never execute during shutdown.
+        sock.sendall(frame(2, b"shutdown-large") * 700 + frame(1, b"shutdown-unadmitted", b"bad"))
+        if half_close:
+            sock.shutdown(socket.SHUT_WR)
+        stats = self.wait_stats(lambda s: s["server"]["requests_started_total"] >= 3,
+                                "pipelined reads did not start")
+        deadline = time.monotonic() + 2
+        while True:
+            started = stats["server"]["requests_started_total"]
+            self.assertLess(started, 701, "responses did not exercise send backpressure")
+            time.sleep(0.05)
+            code, stats = self.runtime_stats()
+            self.assertEqual(code, 200)
+            if stats["server"]["requests_started_total"] == started:
+                break
+            self.assertLess(time.monotonic(), deadline, "reply output never became blocked")
+        admitted_reads = started - 1  # The first request populated the value.
+        applied_sequence = stats["engine"]["applied_sequence"]
+        self.engine.terminate()
+        return admitted_reads, applied_sequence
 
     def test_shutdown_drains_async_replies_after_network_grace_expires(self):
         self.stop("gateway")
