@@ -110,7 +110,7 @@ void wal_progress_and_failure_remain_observable() {
         const auto response = writer.get();
         const auto finished = engine.stats();
         require(entered && available && write_waited, "stats waited for reliable WAL synchronization");
-        const uint64_t bytes = codec::kRecordHeader + 5 + 3 + 4;
+        const uint64_t bytes = codec::kWalRecordHeader + 5 + 3 + 4;
         require(in_flight.applied_sequence == 1 && in_flight.durable_sequence == 0 && in_flight.keys == 1,
                 "in-flight visibility and durability differ from their stats");
         require(in_flight.wal_pending_bytes == bytes && in_flight.wal_inflight_bytes == bytes &&
@@ -149,8 +149,8 @@ void queued_and_inflight_bytes_are_distinct() {
     gate.release();
     engine.close();
     require(entered && result.status == Status::Ok, "second throughput write could not queue during I/O");
-    const auto first = codec::kRecordHeader + 1 + 5 + 4;
-    const auto second = codec::kRecordHeader + 1 + 6 + 4;
+    const auto first = codec::kWalRecordHeader + 1 + 5 + 4;
+    const auto second = codec::kWalRecordHeader + 1 + 6 + 4;
     require(stats.wal_pending_bytes == first + second && stats.wal_inflight_bytes == first &&
             stats.wal_queued_records == 1 && stats.applied_sequence == 2 && stats.durable_sequence == 0,
             "queued and detached WAL batches were conflated");
@@ -240,7 +240,7 @@ void snapshots_report_phases_failures_and_recovery() {
             require(initial.snapshot_capture_state_lock_acquisitions_total == 1 &&
                     initial.snapshot_capture_state_lock_duration_ns_max == initial.snapshot_capture_state_lock_duration_ns_total &&
                     initial.snapshot_file_write_calls_total >= 1 && initial.snapshot_file_written_bytes_total == 28 &&
-                    initial.snapshot_file_installed_bytes_total == 28 && initial.snapshot_compact_written_bytes_total == 0,
+                    initial.snapshot_file_installed_bytes_total == 28 && initial.snapshot_compact_written_bytes_total == codec::kWalFileHeader,
                     "new database did not account for its complete empty snapshot");
             require(engine.execute({Operation::Put, "key", "value"}).status == Status::Ok, "write failed");
             gate.armed = true;

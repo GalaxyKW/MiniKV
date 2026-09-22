@@ -90,40 +90,90 @@ inline std::string response(const Response& result) {
     return bytes;
 }
 
-// A storage record has a 21-byte header, raw key/value bytes, and a CRC32.
+// Snapshot and legacy WAL records retain their original layout. The snapshot
+// reader never repairs incomplete entries, so its existing framing stays safe.
 constexpr size_t kRecordHeader = 21;
+constexpr size_t kWalRecordHeader = 25;
+constexpr size_t kWalFileHeader = 24;
 
-inline std::string record(uint64_t sequence, Operation op, const std::string& key, const std::string& value) {
-    if (op != Operation::Put && op != Operation::Delete) throw std::runtime_error("invalid persistent operation");
-    std::string bytes = "MKL1";
-    bytes.push_back(static_cast<char>(op));
-    append_u64(bytes, sequence);
-    append_u32(bytes, static_cast<uint32_t>(key.size()));
-    append_u32(bytes, static_cast<uint32_t>(value.size()));
-    bytes += key;
-    bytes += value;
+inline std::string wal_file_header() {
+    std::string bytes = "MKVWAL02";
+    append_u32(bytes, 0); // flags
+    append_u64(bytes, 0); // reserved
     append_u32(bytes, crc32(bytes));
     return bytes;
 }
 
-inline size_t record_size(std::string_view header) {
-    if (header.size() < kRecordHeader || header.substr(0, 4) != "MKL1") throw std::runtime_error("corrupt record header");
+inline void validate_wal_file_header(std::string_view bytes) {
+    if (bytes.size() != kWalFileHeader || bytes.substr(0, 8) != "MKVWAL02" ||
+        u32(bytes, 8) != 0 || u64(bytes, 12) != 0 || u32(bytes, 20) != crc32(bytes.substr(0, 20))) {
+        throw std::runtime_error("corrupt WAL file header");
+    }
+}
+
+inline size_t record_payload_size(std::string_view header) {
     const auto op = static_cast<Operation>(header[4]);
     const auto key_size = u32(header, 13), value_size = u32(header, 17);
     if (key_size == 0 || key_size > kMaxKeySize || value_size > kMaxValueSize ||
         (op != Operation::Put && op != Operation::Delete) || (op == Operation::Delete && value_size != 0)) {
         throw std::runtime_error("corrupt record lengths or operation");
     }
-    return kRecordHeader + key_size + value_size + 4;
+    return key_size + value_size;
 }
 
-inline Request decode_record(std::string_view bytes) {
-    if (bytes.size() != record_size(bytes) || u32(bytes, bytes.size() - 4) != crc32(bytes.substr(0, bytes.size() - 4))) {
+inline std::string encode_record(uint64_t sequence, Operation op, const std::string& key,
+                                 const std::string& value, bool protected_header) {
+    if (op != Operation::Put && op != Operation::Delete) throw std::runtime_error("invalid persistent operation");
+    std::string bytes = protected_header ? "MKL2" : "MKL1";
+    bytes.push_back(static_cast<char>(op));
+    append_u64(bytes, sequence);
+    append_u32(bytes, static_cast<uint32_t>(key.size()));
+    append_u32(bytes, static_cast<uint32_t>(value.size()));
+    if (protected_header) append_u32(bytes, crc32(bytes));
+    bytes += key;
+    bytes += value;
+    append_u32(bytes, crc32(bytes));
+    return bytes;
+}
+
+inline std::string record(uint64_t sequence, Operation op, const std::string& key, const std::string& value) {
+    return encode_record(sequence, op, key, value, false);
+}
+
+inline std::string wal_record(uint64_t sequence, Operation op, const std::string& key, const std::string& value) {
+    return encode_record(sequence, op, key, value, true);
+}
+
+inline size_t record_size(std::string_view header) {
+    if (header.size() < kRecordHeader || header.substr(0, 4) != "MKL1") throw std::runtime_error("corrupt record header");
+    return kRecordHeader + record_payload_size(header) + 4;
+}
+
+inline size_t wal_record_size(std::string_view header) {
+    // The fixed header is verified before its lengths can turn corruption into
+    // apparent EOF. A short body is repairable only after this check succeeds.
+    if (header.size() < kWalRecordHeader || header.substr(0, 4) != "MKL2" ||
+        u32(header, 21) != crc32(header.substr(0, 21))) {
+        throw std::runtime_error("corrupt WAL record header");
+    }
+    return kWalRecordHeader + record_payload_size(header) + 4;
+}
+
+inline Request decode_record_body(std::string_view bytes, size_t header_size, size_t record_bytes) {
+    if (bytes.size() != record_bytes || u32(bytes, bytes.size() - 4) != crc32(bytes.substr(0, bytes.size() - 4))) {
         throw std::runtime_error("record checksum mismatch");
     }
     const auto key_size = u32(bytes, 13);
-    return {static_cast<Operation>(bytes[4]), std::string(bytes.substr(kRecordHeader, key_size)),
-            std::string(bytes.substr(kRecordHeader + key_size, u32(bytes, 17)))};
+    return {static_cast<Operation>(bytes[4]), std::string(bytes.substr(header_size, key_size)),
+            std::string(bytes.substr(header_size + key_size, u32(bytes, 17)))};
+}
+
+inline Request decode_record(std::string_view bytes) {
+    return decode_record_body(bytes, kRecordHeader, record_size(bytes));
+}
+
+inline Request decode_wal_record(std::string_view bytes) {
+    return decode_record_body(bytes, kWalRecordHeader, wal_record_size(bytes));
 }
 
 } // namespace minikv::codec

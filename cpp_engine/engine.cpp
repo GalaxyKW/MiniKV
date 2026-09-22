@@ -199,7 +199,7 @@ std::string snapshot_header(uint64_t sequence, uint64_t size) {
 Engine::Engine(EngineConfig config) : config_(std::move(config)) {
     if (config_.data_dir.empty() || config_.wal_batch_size == 0 || config_.wal_flush_interval.count() <= 0 ||
         config_.snapshot_interval.count() < 0 || config_.max_async_requests == 0 ||
-        config_.wal_queue_bytes < kMaxKeySize + kMaxValueSize + codec::kRecordHeader + 4) {
+        config_.wal_queue_bytes < kMaxKeySize + kMaxValueSize + codec::kWalRecordHeader + 4) {
         throw std::invalid_argument("invalid engine configuration");
     }
     config_.data_dir = std::filesystem::absolute(config_.data_dir).lexically_normal().string();
@@ -253,9 +253,13 @@ void Engine::recover() {
         load_snapshot();
         wal_fd_ = ::open(wal_path.c_str(), O_RDWR | O_APPEND | O_CLOEXEC);
         if (wal_fd_ < 0) io_error("open existing WAL (refusing to recreate missing data)");
-        load_wal();
+        const bool legacy_wal = load_wal();
         sync_file(wal_fd_);
         durable_sequence_ = applied_sequence_;
+        // No workers or submissions exist yet. Install a durable checkpoint
+        // before replacing legacy bytes with a v2 header-only WAL. The normal
+        // checkpoint ordering also makes an interrupted upgrade recoverable.
+        if (legacy_wal) snapshot();
         return;
     }
     // Even an empty WAL may belong to a checkpointed database whose snapshot
@@ -273,6 +277,7 @@ void Engine::recover() {
     if (legacy) import_legacy();
     wal_fd_ = ::open(wal_path.c_str(), O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
     if (wal_fd_ < 0) io_error("create WAL");
+    write_all(wal_fd_, codec::wal_file_header());
     sync_file(wal_fd_);
     sync_directory(config_.data_dir);
     snapshot();
@@ -311,20 +316,41 @@ void Engine::load_snapshot() {
     sync_directory(config_.data_dir);
 }
 
-void Engine::load_wal() {
+bool Engine::load_wal() {
     if (::lseek(wal_fd_, 0, SEEK_SET) < 0) io_error("seek WAL");
-    off_t valid_bytes = 0;
+    const auto prefix = read_bytes(wal_fd_, 4);
+    const bool legacy = prefix.empty() || prefix == "MKL1";
+    off_t data_start = 0;
+    if (legacy) {
+        if (::lseek(wal_fd_, 0, SEEK_SET) < 0) io_error("seek legacy WAL");
+    } else {
+        const auto header = prefix + read_bytes(wal_fd_, codec::kWalFileHeader - prefix.size());
+        codec::validate_wal_file_header(header);
+        data_start = static_cast<off_t>(codec::kWalFileHeader);
+    }
+    off_t valid_bytes = data_start;
     const uint64_t checkpoint_sequence = applied_sequence_;
     uint64_t previous = 0;
     bool incomplete_tail = false;
     while (true) {
-        std::string bytes = read_bytes(wal_fd_, codec::kRecordHeader);
+        const auto header_size = legacy ? codec::kRecordHeader : codec::kWalRecordHeader;
+        std::string bytes = read_bytes(wal_fd_, header_size);
         if (bytes.empty()) break;
-        if (bytes.size() != codec::kRecordHeader) { incomplete_tail = true; break; }
-        const size_t size = codec::record_size(bytes);
+        if (bytes.size() != header_size) {
+            if (legacy) throw std::runtime_error("incomplete legacy WAL; refusing ambiguous tail repair");
+            incomplete_tail = true;
+            break;
+        }
+        const size_t size = legacy ? codec::record_size(bytes) : codec::wal_record_size(bytes);
         bytes += read_bytes(wal_fd_, size - bytes.size());
-        if (bytes.size() != size) { incomplete_tail = true; break; }
-        const auto entry = codec::decode_record(bytes);
+        if (bytes.size() != size) {
+            // Legacy lengths lack a separate checksum. A corrupt full record
+            // can look exactly like a torn body; leave the original untouched.
+            if (legacy) throw std::runtime_error("incomplete legacy WAL; refusing ambiguous tail repair");
+            incomplete_tail = true;
+            break;
+        }
+        const auto entry = legacy ? codec::decode_record(bytes) : codec::decode_wal_record(bytes);
         const uint64_t sequence = codec::u64(bytes, 5);
         if (sequence == 0 || (previous != 0 && sequence != previous + 1)) {
             throw std::runtime_error("non-contiguous WAL sequence");
@@ -339,16 +365,17 @@ void Engine::load_wal() {
         }
         valid_bytes += static_cast<off_t>(size);
     }
-    if (applied_sequence_ == checkpoint_sequence && (valid_bytes != 0 || incomplete_tail)) {
-        // A retained WAL can end before the checkpoint sequence. Leaving that
-        // prefix in place would create a sequence gap after the next append.
-        if (::ftruncate(wal_fd_, 0) != 0) io_error("truncate checkpointed WAL during recovery");
+    // Legacy recovery is read-only until the ordinary checkpoint upgrade. All
+    // repairable v2 truncation boundaries preserve the verified file header.
+    if (!legacy && applied_sequence_ == checkpoint_sequence && (valid_bytes != data_start || incomplete_tail)) {
+        if (::ftruncate(wal_fd_, data_start) != 0) io_error("truncate checkpointed WAL during recovery");
         sync_file(wal_fd_);
-    } else if (incomplete_tail) {
+    } else if (!legacy && incomplete_tail) {
         std::cerr << "discarding incomplete WAL tail at byte " << valid_bytes << '\n';
         if (::ftruncate(wal_fd_, valid_bytes) != 0) io_error("truncate incomplete WAL tail");
         sync_file(wal_fd_);
     }
+    return legacy;
 }
 
 void Engine::import_legacy() {
@@ -403,7 +430,7 @@ Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_
         Response result = it == kv_.end() ? Response{Status::NotFound, {}} : Response{Status::Value, it->second};
         return {std::move(result), applied_sequence_, config_.wal_mode == WalMode::Reliable};
     }
-    const size_t size = codec::kRecordHeader + request.key.size() + request.value.size() + 4;
+    const size_t size = codec::kWalRecordHeader + request.key.size() + request.value.size() + 4;
     wait_with_stats(committed_, lock,
                     [&] { return stopping_ || !failure_.empty() || pending_bytes_ + size <= config_.wal_queue_bytes; },
                     stats_.wal_capacity_waiters, stats_.wal_capacity_waits_total,
@@ -415,7 +442,7 @@ Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_
     Status status = Status::Ok;
     try {
         // This mutex defines one order for the WAL, memory, and snapshot boundary.
-        pending_.push_back({sequence, codec::record(sequence, request.operation, request.key, request.value)});
+        pending_.push_back({sequence, codec::wal_record(sequence, request.operation, request.key, request.value)});
         pending_bytes_ += size;
         if (request.operation == Operation::Put) kv_[request.key] = request.value;
         else if (kv_.erase(request.key) == 0) status = Status::NotFound;
@@ -628,6 +655,7 @@ void Engine::compact_wal(int64_t boundary, uint64_t& written_bytes) {
         File replacement(::open(temporary.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0600));
         if (replacement.fd < 0) io_error("create WAL replacement");
         hook("wal.compact.write");
+        write_all(replacement.fd, codec::wal_file_header(), nullptr, &written_bytes);
         std::array<char, 64 * 1024> buffer{};
         off_t offset = static_cast<off_t>(boundary);
         while (offset < end) {

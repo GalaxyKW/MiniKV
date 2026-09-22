@@ -148,7 +148,7 @@ private:
     AppliedRequest apply_locked(const Request& request, std::unique_lock<std::mutex>& lock);
     void recover();
     void load_snapshot();
-    void load_wal();
+    bool load_wal(); // true when an existing legacy WAL needs a checkpoint upgrade
     void import_legacy();
     void write_batch(const std::deque<PendingRecord>& records);
     void commit_batch(const std::deque<PendingRecord>& records, size_t bytes);

@@ -216,7 +216,7 @@ void in_flight_wal_counts_toward_queue_limit() {
         auto config = config_for(dir);
         config.wal_mode = WalMode::Throughput;
         config.wal_batch_size = 1;
-        config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+        config.wal_queue_bytes = codec::kWalRecordHeader + kMaxKeySize + kMaxValueSize + 4;
         WalSyncGate gate;
         gate.fail = fail;
         config.io_hook = [&](const std::string& point) { gate(point); };
@@ -394,7 +394,7 @@ void close_completes_request_waits() {
     TempDir dir;
     auto config = config_for(dir);
     config.wal_batch_size = 1;
-    config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+    config.wal_queue_bytes = codec::kWalRecordHeader + kMaxKeySize + kMaxValueSize + 4;
     WalSyncGate gate;
     config.io_hook = [&](const std::string& point) { gate(point); };
     Engine engine(config);
@@ -467,7 +467,7 @@ void partial_system_write_failure() {
             Engine engine(config);
             // Force a real short write followed by EFBIG, without filling disk.
             std::signal(SIGXFSZ, SIG_IGN);
-            const rlimit limit{10, 10};
+            const rlimit limit{codec::kWalFileHeader + 10, codec::kWalFileHeader + 10};
             if (::setrlimit(RLIMIT_FSIZE, &limit) != 0) ::_exit(90);
             const auto result = engine.execute({Operation::Put, "key", "value"});
             if (result.status != Status::IOError || engine.durable_sequence() != 0) ::_exit(91);
@@ -476,6 +476,9 @@ void partial_system_write_failure() {
     }
     int status = 0;
     require(::waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0, "partial WAL write was not rejected");
+    require(read_file(dir.path + "/wal.v1") == codec::wal_file_header() +
+            codec::wal_record(1, Operation::Put, "key", "value").substr(0, 10),
+            "WAL fault did not write a partial record before failing");
     Engine recovered(config);
     require(get(recovered, "key").status == Status::NotFound, "partial system write became a value");
     put(recovered, "after", "repaired");
@@ -492,9 +495,10 @@ void snapshot_failures_preserve_wal() {
         {
             Engine engine(config);
             put(engine, "key", point);
+            const auto original_wal = read_file(dir.path + "/wal.v1");
             armed = true;
             must_fail([&] { engine.snapshot(); }, "snapshot failure was ignored");
-            require(fs::file_size(dir.path + "/wal.v1") > 0, "failed checkpoint discarded WAL");
+            require(read_file(dir.path + "/wal.v1") == original_wal, "failed checkpoint changed WAL");
             armed = false;
             put(engine, "after", "failure");
             engine.close();
@@ -533,8 +537,8 @@ void crash_at_snapshot_boundaries() {
 }
 
 void truncated_wal_tail() {
-    const size_t first_size = codec::record(1, Operation::Put, "first", "one").size();
-    const size_t second_size = codec::record(2, Operation::Put, "second", "two").size();
+    const size_t first_size = codec::kWalFileHeader + codec::wal_record(1, Operation::Put, "first", "one").size();
+    const size_t second_size = codec::wal_record(2, Operation::Put, "second", "two").size();
     for (size_t cut : {size_t{1}, size_t{20}, size_t{21}, second_size - 1}) {
         TempDir dir;
         auto config = config_for(dir);
@@ -558,7 +562,7 @@ void corruption_and_missing_files() {
     { Engine engine(config); put(engine, "key", "value"); engine.close(); }
     const std::string original = read_file(dir.path + "/wal.v1");
     std::string corrupt = original;
-    corrupt[codec::kRecordHeader + 1] ^= 0x10;
+    corrupt[codec::kWalFileHeader + codec::kWalRecordHeader + 1] ^= 0x10;
     write_file(dir.path + "/wal.v1", corrupt);
     must_fail([&] { Engine engine(config); }, "checksum corruption was silently skipped");
     write_file(dir.path + "/wal.v1", original);
@@ -575,7 +579,7 @@ void missing_snapshot_with_empty_wal() {
     TempDir dir;
     const auto config = config_for(dir);
     { Engine engine(config); put(engine, "durable", "value"); engine.snapshot(); engine.close(); }
-    require(fs::file_size(dir.path + "/wal.v1") == 0, "checkpoint did not empty WAL");
+    require(fs::file_size(dir.path + "/wal.v1") == codec::kWalFileHeader, "checkpoint did not empty WAL");
     fs::remove(dir.path + "/snapshot.v1");
     must_fail([&] { Engine engine(config); }, "missing snapshot silently created an empty database");
     require(!fs::exists(dir.path + "/snapshot.v1"), "failed recovery replaced the missing snapshot");
@@ -600,7 +604,7 @@ void checkpointed_wal_tail_can_accept_new_writes() {
         config.io_hook = {};
         // The checkpoint covers both records, even when the retained WAL has
         // only an older complete prefix and an optional incomplete next record.
-        const size_t first = codec::record(1, Operation::Put, "first", "one").size();
+        const size_t first = codec::kWalFileHeader + codec::wal_record(1, Operation::Put, "first", "one").size();
         fs::resize_file(dir.path + "/wal.v1", first + (torn_tail ? 1 : 0));
         {
             Engine recovered(config);

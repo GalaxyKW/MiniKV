@@ -399,7 +399,7 @@ void capacity_wait_reservations() {
         TempDir dir;
         auto config = config_for(dir);
         config.max_async_requests = 2;
-        config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+        config.wal_queue_bytes = codec::kWalRecordHeader + kMaxKeySize + kMaxValueSize + 4;
         Gate sync_gate;
         std::atomic<bool> first_sync{true};
         config.io_hook = [&](const std::string& point) {
@@ -504,7 +504,7 @@ void close_wakes_reserved_and_registered_requests() {
     TempDir dir;
     auto config = config_for(dir);
     config.max_async_requests = 3;
-    config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+    config.wal_queue_bytes = codec::kWalRecordHeader + kMaxKeySize + kMaxValueSize + 4;
     Gate sync_gate;
     config.io_hook = [&](const std::string& point) { if (point == "wal.sync") sync_gate.pause(); };
     Engine engine(config);
@@ -614,7 +614,7 @@ void concurrent_registration_across_capacity() {
     TempDir dir;
     auto config = config_for(dir);
     config.max_async_requests = 9;
-    config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+    config.wal_queue_bytes = codec::kWalRecordHeader + kMaxKeySize + kMaxValueSize + 4;
     Gate first_sync;
     std::atomic<bool> pause_first{true};
     config.io_hook = [&](const std::string& point) {
@@ -660,12 +660,13 @@ void concurrent_registration_across_capacity() {
     // rather than assuming thread launch order determined its sequence number.
     std::ifstream file(dir.path + "/wal.v1", std::ios::binary);
     const std::string wal{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
-    size_t offset = 0, checked = 0;
+    codec::validate_wal_file_header(std::string_view(wal).substr(0, codec::kWalFileHeader));
+    size_t offset = codec::kWalFileHeader, checked = 0;
     while (offset < wal.size()) {
         const auto remaining = std::string_view(wal).substr(offset);
-        const auto size = codec::record_size(remaining);
+        const auto size = codec::wal_record_size(remaining);
         const auto bytes = remaining.substr(0, size);
-        const auto request = codec::decode_record(bytes);
+        const auto request = codec::decode_wal_record(bytes);
         if (request.key.compare(0, 8, "parallel") == 0) {
             const auto index = static_cast<size_t>(std::stoul(request.key.substr(8)));
             require(index < acknowledged_at.size() && acknowledged_at[index] >= codec::u64(bytes, 5),
@@ -688,7 +689,7 @@ void reserved_callback_resources_during_failure_and_close() {
         TempDir dir;
         auto config = config_for(dir);
         config.max_async_requests = 2;
-        config.wal_queue_bytes = codec::kRecordHeader + kMaxKeySize + kMaxValueSize + 4;
+        config.wal_queue_bytes = codec::kWalRecordHeader + kMaxKeySize + kMaxValueSize + 4;
         Gate sync_gate, destructor_gate;
         std::atomic<uint64_t> destructor_inflight{0};
         std::atomic<bool> destructor_timeout{false};

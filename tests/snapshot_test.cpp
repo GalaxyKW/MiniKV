@@ -185,7 +185,7 @@ void complete_image_spans_multiple_writes() {
             offset += size;
         }
         require(decoded == expected, "large snapshot changed its complete captured image");
-        require(read_file(dir.path + "/wal.v1").empty(), "snapshot verification still depends on WAL replay");
+        require(read_file(dir.path + "/wal.v1") == codec::wal_file_header(), "snapshot verification still depends on WAL replay");
         const auto stats = engine.stats();
         require(stats.applied_sequence == sequence && stats.durable_sequence == sequence &&
                 stats.wal_pending_bytes == 0 && stats.wal_inflight_bytes == 0,
@@ -193,11 +193,11 @@ void complete_image_spans_multiple_writes() {
         require(stats.snapshot_file_written_bytes_total - before.snapshot_file_written_bytes_total == bytes.size() &&
                 stats.snapshot_file_installed_bytes_total - before.snapshot_file_installed_bytes_total == bytes.size() &&
                 stats.snapshot_file_write_calls_total > before.snapshot_file_write_calls_total &&
-                stats.snapshot_compact_written_bytes_total == before.snapshot_compact_written_bytes_total,
+                stats.snapshot_compact_written_bytes_total == before.snapshot_compact_written_bytes_total + codec::kWalFileHeader,
                 "complete snapshot byte accounting differs from its verified file or includes an empty WAL suffix");
         engine.close();
     }
-    require(read_file(dir.path + "/wal.v1").empty(), "close unexpectedly populated the checkpointed WAL");
+    require(read_file(dir.path + "/wal.v1") == codec::wal_file_header(), "close unexpectedly populated the checkpointed WAL");
     Engine recovered(config);
     verify_image(recovered, expected);
     require(recovered.stats().durable_sequence == sequence, "large snapshot recovered the wrong sequence");
@@ -339,9 +339,9 @@ void snapshot_io_allows_reliable_progress() {
         require(result.status == Status::Value && result.value == "unchanged", "concurrent GET changed data");
         verify_mutations(engine, large_value);
         verify_captured_snapshot(dir);
-        const auto expected_wal = codec::record(4, Operation::Put, "changed", large_value) +
-                                  codec::record(5, Operation::Delete, "deleted", "") +
-                                  codec::record(6, Operation::Put, "added", "after");
+        const auto expected_wal = codec::wal_file_header() + codec::wal_record(4, Operation::Put, "changed", large_value) +
+                                  codec::wal_record(5, Operation::Delete, "deleted", "") +
+                                  codec::wal_record(6, Operation::Put, "added", "after");
         require(read_file(dir.path + "/wal.v1") == expected_wal,
                 "WAL compaction did not retain exactly the post-checkpoint suffix");
         const auto after = engine.stats();

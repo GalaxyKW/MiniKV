@@ -440,9 +440,10 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(self.request("GET", key), (200, b"VALUE " + value.encode() + b"\n"))
         wal = Path(self.engine_env["MINIKV_DATA_DIR"]) / "wal.v1"
         deadline = time.monotonic() + 3
-        while wal.stat().st_size and time.monotonic() < deadline:
+        while wal.stat().st_size != 24 and time.monotonic() < deadline:
             time.sleep(0.01)
-        self.assertEqual(wal.stat().st_size, 0, "periodic checkpoint did not run")
+        self.assertEqual(wal.read_bytes()[:8], b"MKVWAL02")
+        self.assertEqual(wal.stat().st_size, 24, "periodic checkpoint did not run")
         self.assertEqual(self.request("POST", "after", "checkpoint"), (200, b"OK\n"))
         self.stop("gateway")
         self.stop("engine", kill=True)
