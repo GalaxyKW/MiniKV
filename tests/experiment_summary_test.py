@@ -162,7 +162,9 @@ class ExperimentSummaryTests(unittest.TestCase):
         save_json(run / "result.json", result)
         count, p99 = args["requests"], int(p99_ms * 1000000)
         preload_count = args["keyspace"] if args["op"] in ("get", "mixed") else 0
-        operations = ({"put": 20, "get": 75, "delete": 5} if args["op"] == "mixed"
+        writes = count * args["write_ratio"] // 100
+        mutations = count * (args["write_ratio"] + args["delete_ratio"]) // 100
+        operations = ({"put": writes, "get": count - mutations, "delete": mutations - writes} if args["op"] == "mixed"
                       else {name: count if name == args["op"] else 0 for name in ("put", "get", "delete")})
         report = {
             "schema_version": 1, "started_at": "2026-09-14T08:00:00Z", "measurement_started_at": "2026-09-14T08:00:00Z",
@@ -550,6 +552,37 @@ class ExperimentSummaryTests(unittest.TestCase):
                 row = summary["experiments"][0]["groups"][0]["runs"][0]
                 self.assertEqual(row["status"], "invalid")
                 self.assertTrue(any("configured workload" in error for error in row["errors"]))
+
+    def test_mixed_reports_with_disabled_operations_are_excluded_from_summaries(self):
+        for write_ratio, delete_ratio, forbidden in ((0, 25, "put"), (25, 0, "delete"), (25, 75, "get")):
+            with self.subTest(forbidden=forbidden):
+                directory = self.experiment("disabled-" + forbidden)
+                manifest_path = directory / "manifest.json"
+                manifest = json.loads(manifest_path.read_text())
+                manifest["arguments"].update(write_ratio=write_ratio, delete_ratio=delete_ratio)
+                save_json(manifest_path, manifest)
+                run = self.add_run(directory)
+                self.invoke([directory])
+                path = run / "report.json"
+                report = json.loads(path.read_text())
+                report["operations"] = {name: report["outcomes"]["requests"] if name == forbidden else 0
+                                        for name in ("put", "get", "delete")}
+                save_json(path, report)
+                # Keep mandatory sequence evidence consistent so exclusion is
+                # caused by the impossible workload itself.
+                sequence = report["preload"]["completed_keys"] + report["operations"]["put"] + report["operations"]["delete"]
+                for phase in ("after", "settled"):
+                    path = run / ("stats-" + phase + ".json")
+                    stats = json.loads(path.read_text())
+                    stats["engine"].update(applied_sequence=sequence, durable_sequence=sequence)
+                    save_json(path, stats)
+                summary = self.invoke([directory], expected=1)
+                group = summary["experiments"][0]["groups"][0]
+                row = group["runs"][0]
+                self.assertEqual(row["status"], "invalid")
+                self.assertTrue(any("configured workload" in error for error in row["errors"]))
+                self.assertIsNone(row["qps_successful"])
+                self.assertEqual(group["distributions"]["qps_successful"]["n"], 0)
 
     def test_per_run_commands_cannot_silently_change_the_controlled_load_or_binary(self):
         for fault in ("load", "binary", "runtime_environment"):

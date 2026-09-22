@@ -98,7 +98,7 @@ python3 benmark/experiment.py --help
 | `resources.jsonl` | 引擎、网关、压测进程的 `/proc` 资源样本 |
 | 日志与 `data/` | 排查启动、运行、停机或持久化问题的现场 |
 
-先检查 `index.json` 中的失败次数与各轮 `result.status`。`index.status: complete` 表示计划中的实验都跑完，**不表示每次都成功**。再检查 `report.json` 的结果分类和实际操作数量，最后结合运行状态、资源与日志解释差异。失败实验只保证保留已经生成的产物，文件可能缺失或不完整。
+先检查 `index.json` 中的失败次数与各轮 `result.status`。`index.status: complete` 表示计划中的实验都跑完，**不表示每次都成功**。再检查 `report.json` 的结果分类和实际操作数量，最后结合运行状态、资源与日志解释差异。报告出现配置禁止的操作时，该轮会判为无效：例如 mixed 的写入比例为 0，却报告执行了 PUT。有限样本中，非零比例的操作可以没有出现，不要求计数恰好符合配置比例。失败实验只保证保留已经生成的产物，文件可能缺失或不完整。
 
 吞吐模式在压测结束时可能仍有未同步 WAL。程序分别保留立即采样的 `stats-after.json` 和排空后的 `stats-settled.json`，将额外等待记录为 `wal_drain_elapsed_ns`；排空时间不会加进压测报告的测量耗时或 QPS 分母。
 

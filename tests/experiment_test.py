@@ -166,8 +166,9 @@ elif role == "bench":
                "preload": {"target_keys": preloaded, "completed_keys": preloaded, "elapsed_ns": 1}, "elapsed_ns": 100000000,
                "outcomes": {"requests": count, "successes": count, "logical_misses": 0, "failures": 0,
                             "network_errors": 0, "timeouts": 0, "transport_errors": 0, "http_failures": 0, "protocol_failures": 0},
-               "operations": {name: count if name == (args["op"] if args["op"] != "mixed" else "get") else 0
-                              for name in ("put", "get", "delete")}, "http_statuses": {"200": count},
+               "operations": control.get("operations", {
+                   name: count if name == (args["op"] if args["op"] != "mixed" else "get") else 0
+                   for name in ("put", "get", "delete")}), "http_statuses": {"200": count},
                "latency_ns": {"samples": count, "mean": 1000, "min": 1000, "p50": 1000,
                               "p95": 1000, "p99": 1000, "p99_9": 1000, "max": 1000},
                "qps_total": count * 10, "qps_successful": count * 10, "system_success_rate_pct": 100}
@@ -428,6 +429,31 @@ class ExperimentRunnerTests(unittest.TestCase):
                 for record in self.pid_records():
                     stopped = json.loads((self.fixtures / "stops" / (str(record["pid"]) + ".json")).read_text())
                     self.assertEqual(stopped["signal"], signal.SIGTERM, "terminal signal reached a child session directly")
+
+    def test_mixed_reports_cannot_include_disabled_operations(self):
+        for write_ratio, delete_ratio, forbidden in ((0, 25, "put"), (25, 0, "delete"),
+                                                    (25, 75, "get"), (100, 0, "get"), (0, 100, "put")):
+            with self.subTest(write_ratio=write_ratio, delete_ratio=delete_ratio, forbidden=forbidden):
+                self.output = self.directory / ("disabled-%d-%d-%s" % (write_ratio, delete_ratio, forbidden))
+                operations = {name: 9 if name == forbidden else 0 for name in ("put", "get", "delete")}
+                self.invoke(control={"operations": operations},
+                            extra=("--write-ratio", str(write_ratio), "--delete-ratio", str(delete_ratio)), expected=1)
+                index = json.loads((self.output / "index.json").read_text())
+                self.assertEqual(index["successful_runs"], 0)
+                for result in index["runs"]:
+                    self.assertEqual(result["status"], "failed")
+                    self.assertTrue(any("configured workload" in error for error in result["errors"]))
+
+    def test_mixed_reports_allow_single_operations_with_nonzero_probability(self):
+        for write_ratio, delete_ratio, observed in ((20, 5, "get"), (100, 0, "put"),
+                                                   (0, 100, "delete"), (0, 0, "get")):
+            with self.subTest(write_ratio=write_ratio, delete_ratio=delete_ratio, observed=observed):
+                self.output = self.directory / ("allowed-%d-%d" % (write_ratio, delete_ratio))
+                operations = {name: 9 if name == observed else 0 for name in ("put", "get", "delete")}
+                self.invoke(control={"operations": operations},
+                            extra=("--write-ratio", str(write_ratio), "--delete-ratio", str(delete_ratio)), expected=0)
+                index = json.loads((self.output / "index.json").read_text())
+                self.assertEqual(index["successful_runs"], 2)
 
     def test_nonfinite_timeout_arguments_do_not_launch_children(self):
         for raw in ("nan", "inf", "-inf", "0", "-1"):
