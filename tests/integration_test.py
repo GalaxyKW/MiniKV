@@ -576,6 +576,44 @@ class MiniKVIntegration(unittest.TestCase):
         self.assertEqual(self.request("POST", body=b'{"key":"x"}{"key":"y"}')[0], 400)
         self.assertEqual(self.request("POST", "large", "x" * (1024 * 1024 + 1))[0], 413)
 
+    def test_invalid_pipeline_preserves_earlier_reply_before_closing(self):
+        value = b"v" * (1024 * 1024)
+        self.assertEqual(self.request("POST", "protocol-large", value.decode()), (200, b"OK\n"))
+        invalid = struct.pack("!4sB3xII", b"MKV1", 1, 4097, 0)
+        for half_close in (False, True):
+            with self.subTest(half_close=half_close), socket.socket() as sock:
+                code, before = self.runtime_stats()
+                self.assertEqual(code, 200)
+                sock.settimeout(3)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+                sock.connect(("127.0.0.1", self.engine_port))
+                # Keep more than one reactor read of input queued. The invalid
+                # header must not cause close() to discard the earlier GET's
+                # large response while unread bytes remain in the kernel.
+                self.engine.send_signal(signal.SIGSTOP)
+                try:
+                    deadline = time.monotonic() + 2
+                    while "State:\tT" not in Path(f"/proc/{self.engine.pid}/status").read_text():
+                        self.assertLess(time.monotonic(), deadline, "reactor did not stop")
+                        time.sleep(0.005)
+                    sock.sendall(frame(2, b"protocol-large") + invalid +
+                                 frame(1, b"protocol-unadmitted", b"bad") * 2000)
+                    if half_close:
+                        sock.shutdown(socket.SHUT_WR)
+                finally:
+                    self.engine.send_signal(signal.SIGCONT)
+                self.wait_stats(lambda s: s["server"]["requests_started_total"] ==
+                                before["server"]["requests_started_total"] + 1 and
+                                s["server"]["requests_inflight"] == 0,
+                                "GET did not reach the socket output buffer")
+                time.sleep(0.05)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+                self.assertEqual(read_response(sock), (1, value))
+                self.assertEqual(read_response(sock)[0], 3)
+                self.assertEqual(sock.recv(1), b"", "invalid pipeline did not end after its error")
+            self.assertEqual(self.request("GET", "protocol-unadmitted"), (404, b"NOT_FOUND\n"))
+            self.assertIsNone(self.engine.poll(), "invalid pipeline stopped the engine")
+
     def test_acknowledged_writes_survive_kill(self):
         acknowledged = {}
         finished = threading.Event()

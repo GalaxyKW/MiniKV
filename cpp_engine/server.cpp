@@ -274,7 +274,8 @@ private:
             }
             for (auto id : expired) close_client(id);
             // ACKs alone need not wake EPOLLIN. Recheck the send queue on the
-            // existing reactor tick, under the same overall shutdown deadline.
+            // existing reactor tick, bounded by idle expiry or the overall
+            // shutdown deadline.
             for (auto id : closing) drain_client_input(id);
         }
     }
@@ -494,7 +495,9 @@ private:
             return;
         }
         if (client.close_after_write) {
-            close_client(id);
+            // An invalid pipelined request must not reset earlier replies that
+            // send() accepted but the peer has not yet received.
+            begin_client_shutdown(id);
             return;
         }
         if (!dispatch(id)) arm(id, EPOLLIN);
@@ -516,7 +519,7 @@ private:
         auto& client = clients_.at(id);
         std::array<char, 8192> buffer{};
         // Keep a continuously sending peer from monopolizing the reactor or
-        // extending the single five-second network grace period.
+        // extending the idle timeout or five-second shutdown grace period.
         for (size_t discarded = 0; discarded < 64 * 1024;) {
             if (draining_ && Clock::now() >= shutdown_deadline_) return;
             const ssize_t count = ::recv(client.fd, buffer.data(), buffer.size(), 0);
@@ -533,7 +536,7 @@ private:
             // SIOCOUTQNSD, this includes sent but unacknowledged data and FIN.
             // With input drained, zero means no response output can be lost by
             // close, even if a pooled client keeps its write side open. Failure
-            // to inspect the queue waits for EOF or the existing deadline.
+            // to inspect the queue waits for EOF, idle expiry, or shutdown.
             int queued = -1;
             if (::ioctl(client.fd, SIOCOUTQ, &queued) == 0 && queued == 0) close_client(id);
             return;
