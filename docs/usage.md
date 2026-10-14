@@ -188,8 +188,10 @@ MINIKV_DATA_DIR=./data-backup ./build/engine --check
 | 退出码 | 输出与含义 |
 | --- | --- |
 | `0` | stdout 输出一条 JSON，`status` 为 `valid`：已读取的快照和 WAL 完整有效 |
-| `2` | stdout 输出一条 JSON，`status` 为 `recoverable_tail`：v2 WAL 有不完整尾记录，正常恢复可丢弃该尾部；检查本身保留原文件 |
+| `2` | stdout 输出一条 JSON，`status` 为 `recoverable_tail`：v2 WAL 的不完整尾记录仍可能补全为合法记录，正常恢复可丢弃该尾部；检查本身保留原文件 |
 | `1` | stderr 给出错误：损坏、缺文件、锁占用、容量超限、I/O 或检查参数错误；扫描未成功时 stdout 为空 |
+
+尾记录不足一条并不自动意味着可修复：已有的 magic、操作、长度、序列或 CRC 前缀一旦不可能合法，就返回 `1`。头部已能证明的序列缺口也不会因正文缺失而被忽略；具体规则见[文件格式与恢复](design.md#wal-和快照文件)。
 
 报告不包含 key/value 内容。字段 `schema_version` 当前为 1；`keys` 和 `data_bytes` 是回放完整记录后的键数与 key/value 总字节数，`data_capacity_bytes` 是此次检查的配置上限；`snapshot_sequence` 与 `applied_sequence` 分别为快照及回放后的序列。`wal_format` 为 `v1`（旧版 `MKL1`）或 `v2`；`wal_valid_bytes` 是原 WAL 中完整前缀的字节数（v2 包含 24 字节文件头），`wal_trailing_bytes` 是未完成尾记录的字节数。完整但被快照覆盖的记录仍计入完整前缀，不按启动后回收的大小报告。
 

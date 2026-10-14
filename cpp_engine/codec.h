@@ -2,6 +2,7 @@
 
 #include "engine.h"
 
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -95,6 +96,44 @@ inline std::string response(const Response& result) {
 constexpr size_t kRecordHeader = 21;
 constexpr size_t kWalRecordHeader = 25;
 constexpr size_t kWalFileHeader = 24;
+
+// Whether the available high bytes of a 1..8-byte big-endian integer can
+// still be completed to a value in [minimum, maximum]. Missing bytes impose
+// no constraint; a seen prefix avoids shifting a uint64_t by 64 bits.
+inline bool unsigned_prefix_in_range(std::string_view bytes, size_t offset, size_t width,
+                                     uint64_t minimum, uint64_t maximum) {
+    if (bytes.size() <= offset) return true;
+    const size_t seen = std::min(width, bytes.size() - offset);
+    uint64_t prefix = 0;
+    for (size_t i = 0; i < seen; ++i) prefix = (prefix << 8) | static_cast<unsigned char>(bytes[offset + i]);
+    const auto shift = 8 * (width - seen);
+    return (minimum >> shift) <= prefix && prefix <= (maximum >> shift);
+}
+
+inline bool checksum_prefix_matches(std::string_view bytes, size_t offset) {
+    if (bytes.size() <= offset) return true;
+    const auto checksum = crc32(bytes.substr(0, offset));
+    return unsigned_prefix_in_range(bytes, offset, 4, checksum, checksum);
+}
+
+// A short v2 header is repairable only if it can be extended to a legal one.
+// In particular, EOF must not hide an already impossible magic, operation,
+// length or checksum prefix. Sequence feasibility depends on recovery state
+// and is checked by the WAL reader before it accepts an incomplete record.
+inline void validate_wal_record_prefix(std::string_view bytes) {
+    const auto magic_bytes = std::min<size_t>(bytes.size(), 4);
+    if (bytes.substr(0, magic_bytes) != std::string_view("MKL2").substr(0, magic_bytes)) {
+        throw std::runtime_error("corrupt WAL record header prefix");
+    }
+    if (bytes.size() <= 4) return;
+    const auto operation = static_cast<Operation>(bytes[4]);
+    if ((operation != Operation::Put && operation != Operation::Delete) ||
+        !unsigned_prefix_in_range(bytes, 13, 4, 1, kMaxKeySize) ||
+        !unsigned_prefix_in_range(bytes, 17, 4, 0, operation == Operation::Put ? kMaxValueSize : 0) ||
+        !checksum_prefix_matches(bytes, 21)) {
+        throw std::runtime_error("corrupt WAL record header prefix");
+    }
+}
 
 inline std::string wal_file_header() {
     std::string bytes = "MKVWAL02";

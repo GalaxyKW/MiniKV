@@ -45,7 +45,7 @@ make docs-test
 | 范围 | 验证内容 | 测试入口 |
 | --- | --- | --- |
 | 存储与恢复 | 二进制值、并发写入、group commit、目录独占、旧数据导入、并发关闭、WAL 尾部修复、校验和错误与文件缺失 | [engine_test.cpp](../tests/engine_test.cpp) |
-| WAL 格式与升级 | 文件头与两条记录头逐位损坏、每个真实尾部截断位置、旧版含糊尾部保持原样、固定旧版本文件兼容、检查点升级及安装边界异常/退出后恢复 | [wal_format_test.cpp](../tests/wal_format_test.cpp) |
+| WAL 格式与升级 | 文件头与两条记录头逐位损坏、合法记录每个截断位置、不可能合法的短头及 CRC 前缀、正文缺失时的序列错误、旧版含糊尾部保持原样、固定旧版本文件兼容、检查点升级及安装边界异常/退出后恢复 | [wal_format_test.cpp](../tests/wal_format_test.cpp) |
 | 离线备份检查 | 独立编码的快照与新旧 WAL、完整前缀与尾损、CRC 与序列错误、缺文件、锁冲突、链接及特殊文件、无写权限检查与命令配置隔离；验证检查不改原文件 | [check_test.py](../tests/check_test.py) |
 | 文件系统边界 | 重定向目录链接、重命名并复用路径时两个数据库互不串写；文件类型及硬链接检查、临时文件别名与写失败后恢复、只读硬链接保留、旧数据字段边界、超长字段提前拒绝及行尾校验 | [filesystem_test.cpp](../tests/filesystem_test.cpp) |
 | 数据容量 | key/value 字节精确计量、覆盖和删除释放、无副作用拒绝、异步即时响应、并发额度竞争、WAL 等待后重查、恢复最终状态及超限拒绝不改文件 | [data_limit_test.cpp](../tests/data_limit_test.cpp) |

@@ -45,6 +45,10 @@ def wal_header():
     return with_crc(struct.pack("!8sIQ", b"MKVWAL02", 0, 0))
 
 
+def protected_header(sequence, operation=1, key_size=1, value_size=1):
+    return with_crc(struct.pack("!4sBQII", b"MKL2", operation, sequence, key_size, value_size))
+
+
 def inventory(directory):
     """Capture replacement, rewrite and cleanup effects, without following links.
 
@@ -185,6 +189,12 @@ class StorageCheck(unittest.TestCase):
         self.fixture(snapshot(1, [(PRIVATE_KEY, PRIVATE_VALUE)]), prefix + following[:-1])
         self.assert_report(self.check(2), image={PRIVATE_KEY: PRIVATE_VALUE}, sequence=1, checkpoint=1,
                            valid_bytes=len(prefix), trailing_bytes=len(following) - 1)
+        deletion = record(2, PRIVATE_KEY, operation=3)
+        for cut in range(1, len(deletion)):
+            with self.subTest(delete_cut=cut):
+                self.fixture(wal_bytes=prefix + deletion[:cut])
+                self.assert_report(self.check(2), image={PRIVATE_KEY: PRIVATE_VALUE}, sequence=1,
+                                   valid_bytes=len(prefix), trailing_bytes=cut)
 
     def test_corruption_is_rejected_instead_of_reported_as_tail(self):
         good_record = record(1, PRIVATE_KEY, PRIVATE_VALUE)
@@ -223,6 +233,87 @@ class StorageCheck(unittest.TestCase):
                                     for sequence in sequences)
                     self.fixture(snapshot(checkpoint), wal)
                     self.check(1)
+
+    def test_impossible_short_header_prefixes_are_rejected(self):
+        prefix = wal_header() + record(1, PRIVATE_KEY, PRIVATE_VALUE)
+        valid = protected_header(2)
+        tails = {}
+        for cut in range(1, 5):
+            tails[f"magic byte {cut}"] = valid[:cut - 1] + bytes([valid[cut - 1] ^ 1])
+        for operation in (0, 2, 4, 255):
+            tails[f"operation {operation}"] = protected_header(2, operation=operation)[:5]
+        for size, cut in ((1 << 24, 14), (1 << 16, 15), (4352, 16), (0, 17), (4097, 17)):
+            tails[f"key length {size} at {cut}"] = protected_header(2, key_size=size)[:cut]
+        for size, cut in ((1 << 24, 18), (17 << 16, 19), ((1 << 20) + 256, 20), ((1 << 20) + 1, 21)):
+            tails[f"value length at {cut}"] = protected_header(2, value_size=size)[:cut]
+        for cut in range(18, 22):
+            tails[f"DELETE value at {cut}"] = protected_header(2, operation=3, value_size=1 << ((21 - cut) * 8))[:cut]
+        for cut in range(6, 14):
+            sequence = 2 ^ (1 << ((13 - cut) * 8))
+            tails[f"sequence at {cut}"] = protected_header(sequence)[:cut]
+        tails["zero sequence"] = protected_header(0)[:13]
+        for cut in range(22, 25):
+            tails[f"header CRC at {cut}"] = valid[:cut - 1] + bytes([valid[cut - 1] ^ 1])
+        for label, tail in tails.items():
+            with self.subTest(label=label):
+                self.fixture(wal_bytes=prefix + tail)
+                self.check(1)
+        for tail in (protected_header(1 << 56)[:6], protected_header(0)[:13]):
+            with self.subTest(first_sequence=tail.hex()):
+                self.fixture(wal_bytes=wal_header() + tail)
+                self.check(1)
+        maximum = (1 << 64) - 1
+        exhausted = wal_header() + record(maximum, PRIVATE_KEY, PRIVATE_VALUE)
+        for cut in (1, 5, 13, 25):
+            with self.subTest(after_maximum=cut):
+                self.fixture(snapshot(maximum), exhausted + valid[:cut])
+                self.check(1)
+
+    def test_protected_sequences_are_checked_before_incomplete_bodies(self):
+        for checkpoint in (0, 2):
+            for has_prefix in (False, True):
+                prefix = wal_header() + (record(1, PRIVATE_KEY, PRIVATE_VALUE) if has_prefix else b"")
+                sequences = (0, 1, 3) if has_prefix else (0, checkpoint + 2)
+                for sequence in sequences:
+                    tail = record(sequence, b"unfinished", b"body")
+                    for cut in (25, 26, len(tail) - 1):
+                        with self.subTest(checkpoint=checkpoint, has_prefix=has_prefix, sequence=sequence, cut=cut):
+                            self.fixture(snapshot(checkpoint), prefix + tail[:cut])
+                            self.check(1)
+
+    def test_partial_record_checksums_must_match_available_bytes(self):
+        prefix = wal_header() + record(1, PRIVATE_KEY, PRIVATE_VALUE)
+        for operation in (1, 3):
+            tail = record(2, PRIVATE_KEY, b"replacement" if operation == 1 else b"", operation=operation)
+            for available in range(1, 4):
+                truncated = tail[:len(tail) - 4 + available]
+                for corrupt in (False, True):
+                    with self.subTest(operation=operation, available=available, corrupt=corrupt):
+                        suffix = truncated[:-1] + bytes([truncated[-1] ^ 1]) if corrupt else truncated
+                        self.fixture(wal_bytes=prefix + suffix)
+                        result = self.check(1 if corrupt else 2)
+                        if not corrupt:
+                            self.assert_report(result, image={PRIVATE_KEY: PRIVATE_VALUE}, sequence=1,
+                                               valid_bytes=len(prefix), trailing_bytes=len(suffix))
+
+    def test_possible_header_prefixes_retain_snapshot_and_report_tail(self):
+        maximum = (1 << 64) - 1
+        cases = [(2, record(1, b"covered", b"ignored")),
+                 (2, record(2, b"covered", b"ignored")),
+                 (maximum - 1, record(maximum, b"last", b"value")),
+                 (maximum, record(maximum, b"last", b"value")),
+                 (0, protected_header(1, key_size=4096, value_size=1 << 20)),
+                 (0, protected_header(1, operation=3, key_size=4096, value_size=0))]
+        for checkpoint, tail in cases:
+            for cut in range(1, min(26, len(tail))):
+                with self.subTest(checkpoint=checkpoint, header=tail[:21].hex(), cut=cut):
+                    self.fixture(snapshot(checkpoint, [(PRIVATE_KEY, PRIVATE_VALUE)]), wal_header() + tail[:cut])
+                    self.assert_report(self.check(2), image={PRIVATE_KEY: PRIVATE_VALUE}, sequence=checkpoint,
+                                       checkpoint=checkpoint, valid_bytes=24, trailing_bytes=cut)
+        wal = wal_header() + record(maximum, b"covered", b"ignored")
+        self.fixture(snapshot(maximum, [(PRIVATE_KEY, PRIVATE_VALUE)]), wal)
+        self.assert_report(self.check(), image={PRIVATE_KEY: PRIVATE_VALUE}, sequence=maximum,
+                           checkpoint=maximum, valid_bytes=len(wal))
 
     def test_missing_files_and_text_import_do_not_create_storage(self):
         self.check(1)  # Missing directory must not be created.

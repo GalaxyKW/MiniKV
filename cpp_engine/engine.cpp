@@ -395,6 +395,22 @@ struct WalReplayResult {
     size_t trailing_bytes = 0;
 };
 
+void validate_wal_sequence_prefix(std::string_view bytes, uint64_t previous, uint64_t applied_sequence) {
+    const auto maximum = std::numeric_limits<uint64_t>::max();
+    if (previous != 0) {
+        if (previous == maximum ||
+            !codec::unsigned_prefix_in_range(bytes, 5, 8, previous + 1, previous + 1)) {
+            throw std::runtime_error("non-contiguous WAL sequence");
+        }
+    } else {
+        // An intact old WAL may begin anywhere in the checkpointed prefix.
+        const auto latest = applied_sequence == maximum ? maximum : applied_sequence + 1;
+        if (!codec::unsigned_prefix_in_range(bytes, 5, 8, 1, latest)) {
+            throw std::runtime_error("invalid first WAL sequence");
+        }
+    }
+}
+
 WalReplayResult replay_wal(int fd, StorageImage& image, uint64_t& applied_sequence) {
     if (::lseek(fd, 0, SEEK_SET) < 0) io_error("seek WAL");
     const auto prefix = read_bytes(fd, 4);
@@ -415,15 +431,23 @@ WalReplayResult replay_wal(int fd, StorageImage& image, uint64_t& applied_sequen
         if (bytes.empty()) break;
         if (bytes.size() != header_size) {
             if (result.legacy) throw std::runtime_error("incomplete legacy WAL; refusing ambiguous tail repair");
+            codec::validate_wal_record_prefix(bytes);
+            validate_wal_sequence_prefix(bytes, previous, applied_sequence);
             result.trailing_bytes = bytes.size();
             break;
         }
         const size_t size = result.legacy ? codec::record_size(bytes) : codec::wal_record_size(bytes);
+        // Once a v2 header is verified, a missing body cannot make a known
+        // sequence gap or duplicate repairable. Do not advance replay yet.
+        if (!result.legacy) validate_wal_sequence_prefix(bytes, previous, applied_sequence);
         bytes += read_bytes(fd, size - bytes.size());
         if (bytes.size() != size) {
             // Legacy lengths lack a separate checksum. A corrupt full record
             // can look exactly like a torn body; leave the original untouched.
             if (result.legacy) throw std::runtime_error("incomplete legacy WAL; refusing ambiguous tail repair");
+            if (!codec::checksum_prefix_matches(bytes, size - 4)) {
+                throw std::runtime_error("record checksum prefix mismatch");
+            }
             result.trailing_bytes = bytes.size();
             break;
         }

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <sys/wait.h>
@@ -144,6 +145,171 @@ void every_v2_record_tail_boundary_recovers() {
             Engine again(config);
             require(get(again, "after").value == "repair", "append after repair failed to recover");
             if (has_prefix) require(get(again, "first").value == "one", "repair lost acknowledged prefix");
+        }
+    }
+}
+
+std::string protected_header(uint64_t sequence, Operation operation, uint32_t key_size, uint32_t value_size) {
+    std::string header = "MKL2";
+    header.push_back(static_cast<char>(operation));
+    codec::append_u64(header, sequence);
+    codec::append_u32(header, key_size);
+    codec::append_u32(header, value_size);
+    codec::append_u32(header, codec::crc32(header));
+    return header;
+}
+
+void impossible_short_headers_preserve_originals() {
+    TempDir dir;
+    snapshot_fixture(dir, 0);
+    const auto prefix = codec::wal_file_header() + codec::wal_record(1, Operation::Put, "first", "one");
+    const auto valid = protected_header(2, Operation::Put, 1, 1);
+    std::vector<std::pair<std::string, std::string>> tails;
+    for (size_t cut = 1; cut <= 4; ++cut) {
+        auto bytes = valid.substr(0, cut);
+        bytes.back() ^= 1;
+        tails.emplace_back("partial magic byte " + std::to_string(cut), bytes);
+    }
+    for (const auto op : {0, 2, 4, 255}) {
+        auto bytes = valid.substr(0, 5);
+        bytes[4] = static_cast<char>(op);
+        tails.emplace_back("partial operation " + std::to_string(op), bytes);
+    }
+    for (const auto& test : std::vector<std::pair<uint32_t, size_t>>{
+             {1U << 24, 14}, {1U << 16, 15}, {4352, 16}, {0, 17}, {4097, 17}}) {
+        tails.emplace_back("partial key length at " + std::to_string(test.second) + ":" + std::to_string(test.first),
+                           protected_header(2, Operation::Put, test.first, 1).substr(0, test.second));
+    }
+    for (const auto& test : std::vector<std::pair<uint32_t, size_t>>{
+             {1U << 24, 18}, {17U << 16, 19}, {(1U << 20) + 256, 20}, {(1U << 20) + 1, 21}}) {
+        tails.emplace_back("partial value length at " + std::to_string(test.second),
+                           protected_header(2, Operation::Put, 1, test.first).substr(0, test.second));
+    }
+    for (size_t cut = 18; cut <= 21; ++cut) {
+        const uint32_t nonzero = uint32_t{1} << ((21 - cut) * 8);
+        tails.emplace_back("partial DELETE value length at " + std::to_string(cut),
+                           protected_header(2, Operation::Delete, 1, nonzero).substr(0, cut));
+    }
+    for (size_t cut = 6; cut <= 13; ++cut) {
+        const uint64_t wrong = uint64_t{2} ^ (uint64_t{1} << ((13 - cut) * 8));
+        tails.emplace_back("partial sequence at " + std::to_string(cut),
+                           protected_header(wrong, Operation::Put, 1, 1).substr(0, cut));
+    }
+    tails.emplace_back("zero sequence", protected_header(0, Operation::Put, 1, 1).substr(0, 13));
+    for (size_t cut = 22; cut < codec::kWalRecordHeader; ++cut) {
+        auto bytes = valid.substr(0, cut);
+        bytes.back() ^= 1;
+        tails.emplace_back("partial header checksum at " + std::to_string(cut), bytes);
+    }
+    for (const auto& tail : tails) rejected_unchanged(dir, prefix + tail.second, tail.first);
+
+    // Before the first WAL record, snapshot+1 bounds the possible sequence.
+    rejected_unchanged(dir, codec::wal_file_header() +
+        protected_header(uint64_t{1} << 56, Operation::Put, 1, 1).substr(0, 6), "first sequence high byte");
+    rejected_unchanged(dir, codec::wal_file_header() +
+        protected_header(0, Operation::Put, 1, 1).substr(0, 13), "first zero sequence");
+
+    const auto maximum = std::numeric_limits<uint64_t>::max();
+    snapshot_fixture(dir, maximum);
+    const auto exhausted = codec::wal_file_header() + codec::wal_record(maximum, Operation::Put, "old", "covered");
+    for (size_t cut : {size_t{1}, size_t{5}, size_t{13}, codec::kWalRecordHeader}) {
+        rejected_unchanged(dir, exhausted + valid.substr(0, cut), "tail after exhausted sequence");
+    }
+}
+
+void protected_sequences_are_checked_before_incomplete_bodies() {
+    TempDir dir;
+    const auto first = codec::wal_record(1, Operation::Put, "first", "one");
+    for (const auto checkpoint : {uint64_t{0}, uint64_t{2}}) {
+        snapshot_fixture(dir, checkpoint);
+        for (const bool has_prefix : {false, true}) {
+            const auto prefix = codec::wal_file_header() + (has_prefix ? first : std::string{});
+            const std::vector<uint64_t> sequences = has_prefix ? std::vector<uint64_t>{0, 1, 3}
+                : std::vector<uint64_t>{0, checkpoint + 2};
+            for (const auto sequence : sequences) {
+                const auto tail = codec::wal_record(sequence, Operation::Put, "missing", "body");
+                for (const size_t cut : {codec::kWalRecordHeader, codec::kWalRecordHeader + 1, tail.size() - 1}) {
+                    rejected_unchanged(dir, prefix + tail.substr(0, cut),
+                        "protected invalid sequence " + std::to_string(sequence) + " with incomplete body");
+                }
+            }
+        }
+    }
+}
+
+void partial_record_checksums_preserve_originals() {
+    TempDir dir;
+    snapshot_fixture(dir, 0);
+    const auto prefix = codec::wal_file_header() + codec::wal_record(1, Operation::Put, "first", "one");
+    for (const auto operation : {Operation::Put, Operation::Delete}) {
+        const auto record = codec::wal_record(2, operation, "first", operation == Operation::Put ? "two" : "");
+        for (size_t available = 1; available < 4; ++available) {
+            auto tail = record.substr(0, record.size() - 4 + available);
+            tail.back() ^= 1;
+            rejected_unchanged(dir, prefix + tail, "partial record checksum byte " + std::to_string(available));
+        }
+    }
+}
+
+void possible_header_prefixes_remain_recoverable() {
+    const auto maximum = std::numeric_limits<uint64_t>::max();
+    for (const auto& sequences : std::vector<std::pair<uint64_t, uint64_t>>{
+             {2, 1}, {2, 2}, {maximum - 1, maximum}, {maximum, maximum}}) {
+        const auto checkpoint = sequences.first;
+        const auto sequence = sequences.second;
+        const auto tail = codec::wal_record(sequence, Operation::Put, "new", "value");
+        for (size_t cut = 1; cut < tail.size(); ++cut) {
+            TempDir dir;
+            // An incomplete first record may be covered by the snapshot, the
+            // next sequence after it, or the largest representable sequence.
+            snapshot_fixture(dir, checkpoint, {{"stable", "yes"}});
+            write_file(dir.path + "/wal.v1", codec::wal_file_header() + tail.substr(0, cut));
+            Engine recovered(config_for(dir));
+            require(get(recovered, "stable").value == "yes" && recovered.durable_sequence() == checkpoint,
+                    "possible incomplete header changed the snapshot");
+            require(read_file(dir.path + "/wal.v1") == codec::wal_file_header(),
+                    "possible incomplete header was not repaired");
+            recovered.close();
+        }
+    }
+    {
+        TempDir dir;
+        snapshot_fixture(dir, maximum, {{"stable", "yes"}});
+        write_file(dir.path + "/wal.v1", codec::wal_file_header() +
+                   codec::wal_record(maximum, Operation::Put, "covered", "ignored"));
+        Engine recovered(config_for(dir));
+        require(recovered.durable_sequence() == maximum && get(recovered, "stable").value == "yes" &&
+                get(recovered, "covered").status == Status::NotFound,
+                "maximum snapshot rejected or reapplied its covered maximum record");
+        recovered.close();
+    }
+    for (const auto& header : std::vector<std::string>{
+             protected_header(1, Operation::Put, kMaxKeySize, kMaxValueSize),
+             protected_header(1, Operation::Delete, kMaxKeySize, 0)}) {
+        for (size_t cut = 1; cut <= header.size(); ++cut) {
+            TempDir dir;
+            snapshot_fixture(dir, 0);
+            write_file(dir.path + "/wal.v1", codec::wal_file_header() + header.substr(0, cut));
+            Engine recovered(config_for(dir));
+            require(recovered.durable_sequence() == 0 &&
+                    read_file(dir.path + "/wal.v1") == codec::wal_file_header(),
+                    "valid maximum-length or DELETE header prefix was rejected");
+            recovered.close();
+        }
+    }
+    for (const auto operation : {Operation::Put, Operation::Delete}) {
+        const auto first = codec::wal_record(1, Operation::Put, "first", "one");
+        const auto record = codec::wal_record(2, operation, "first", operation == Operation::Put ? "two" : "");
+        const size_t first_cut = operation == Operation::Delete ? 1 : record.size() - 3;
+        for (size_t cut = first_cut; cut < record.size(); ++cut) {
+            TempDir dir;
+            snapshot_fixture(dir, 0);
+            const auto prefix = codec::wal_file_header() + first;
+            write_file(dir.path + "/wal.v1", prefix + record.substr(0, cut));
+            Engine recovered(config_for(dir));
+            require(get(recovered, "first").value == "one" && recovered.durable_sequence() == 1 &&
+                    read_file(dir.path + "/wal.v1") == prefix, "possible partial PUT/DELETE record was not repaired");
+            recovered.close();
         }
     }
 }
@@ -332,6 +498,10 @@ int main(int argc, char** argv) {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"protected headers", header_corruption_never_repairs_records},
         {"v2 torn tails", every_v2_record_tail_boundary_recovers},
+        {"impossible short headers", impossible_short_headers_preserve_originals},
+        {"protected incomplete sequences", protected_sequences_are_checked_before_incomplete_bodies},
+        {"partial record checksums", partial_record_checksums_preserve_originals},
+        {"possible header prefixes", possible_header_prefixes_remain_recoverable},
         {"legacy ambiguous tails", legacy_ambiguous_tails_preserve_originals},
         {"legacy upgrade", legacy_upgrade_is_checkpointed_before_use},
         {"frozen legacy compatibility", frozen_legacy_files_remain_compatible},
