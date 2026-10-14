@@ -87,7 +87,7 @@ make docs-test
 | 快照并发 | 快照文件写盘期间可靠读写继续完成；快照捕获固定版本；自动快照、多个快照串行执行、关闭等待快照、WAL 替换保留后续写入 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 快照输出与恢复 | 跨多个输出缓冲的小记录、大记录、空值与 NUL，逐记录 CRC 对账并在 WAL 只有文件头时恢复；真实快照短写/EFBIG 后保留旧文件、继续可靠写入并重启 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 快照计量 | 捕获持锁计时不包含门控 WAL 同步；快照与后缀写入量和实际文件对账；部分写、同步或安装后失败保留准确计数 | [stats_test.cpp](../tests/stats_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
-| 故障边界 | WAL/快照 I/O 故障注入、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
+| 故障边界 | WAL/快照 I/O 故障注入、空诊断仍锁存失败并结束可靠等待、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[async_test.cpp](../tests/async_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | HTTP 与 RPC | 参数与状态码映射、非法查询串与显式 null 字段不执行后端操作、合法慢上传的响应预算、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
 | 网关 HTTP 接纳 | 慢上传在解码前占名额、RPC 池前等待者受限；定长/chunked/100-continue 的未发送正文仍能收到拒绝；响应写入、取消、panic 与名额归还；数据和状态路由独立 | [admission_test.go](../go_server/admission_test.go)、[端到端测试](../tests/integration_test.py) |
 | 运行状态 | WAL 队列与写盘批次区分、容量与可靠确认等待、任务排队计时、失败唤醒与重启归零；RPC 等待与重试、基础字段缺失或 null 不补零、旧引擎可选字段的透传语义 | [engine_test.cpp](../tests/engine_test.cpp)、[stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |

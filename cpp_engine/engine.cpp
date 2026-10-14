@@ -659,8 +659,11 @@ void Engine::import_legacy() {
 
 void Engine::fail_locked(const std::string& message) {
     if (failure_.empty()) {
-        failure_ = message;
-        std::cerr << "storage I/O failure; requests rejected until restart: " << message << '\n';
+        // A nonempty diagnostic is also the terminal-failure latch. An I/O
+        // hook may throw an exception with no message; it must still wake and
+        // reject waiters instead of allowing commits past a failed WAL batch.
+        failure_ = message.empty() ? "storage operation failed without a diagnostic" : message;
+        std::cerr << "storage I/O failure; requests rejected until restart: " << failure_ << '\n';
     }
     committed_.notify_all();
 }

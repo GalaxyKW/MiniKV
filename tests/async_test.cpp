@@ -14,6 +14,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 #include <unistd.h>
 #include <vector>
 
@@ -363,12 +364,16 @@ void slots_cover_callback_resources() {
 }
 
 void wal_failures_complete_callbacks() {
-    for (const std::string failure_point : {"wal.write", "wal.sync"}) {
+    for (const auto& fault : std::vector<std::pair<std::string, std::string>>{
+             {"wal.write", "injected async WAL failure"}, {"wal.sync", "injected async WAL failure"},
+             {"wal.write", ""}, {"wal.sync", ""}}) {
+        const auto& failure_point = fault.first;
+        const auto& diagnostic = fault.second;
         TempDir dir;
         auto config = config_for(dir);
         Gate failing_io;
         config.io_hook = [&](const std::string& point) {
-            if (point == failure_point) { failing_io.pause(); throw std::runtime_error("injected async WAL failure"); }
+            if (point == failure_point) { failing_io.pause(); throw std::runtime_error(diagnostic); }
         };
         Engine engine(config);
         Reply put, get, missing_delete, unused;
@@ -377,13 +382,22 @@ void wal_failures_complete_callbacks() {
         require(!engine.execute_async({Operation::Get, "key", {}}, get.callback()), "GET bypassed pending WAL");
         require(!engine.execute_async({Operation::Delete, "missing", {}}, missing_delete.callback()), "DELETE bypassed pending WAL");
         failing_io.release();
+        require(await_stats(engine, [](const EngineStats& stats) { return stats.wal_commit_failures_total != 0; }) &&
+                engine.stats().io_failed, "WAL exception did not latch terminal state");
         const auto written = put.get(), read = get.get(), deleted = missing_delete.get();
         engine.drain_async();
         const auto failed = engine.stats();
         auto rejected = engine.execute_async({Operation::Put, "later", "value"}, unused.callback());
+        auto rejected_read = engine.execute_async({Operation::Get, "key", {}}, unused.callback());
+        auto rejected_delete = engine.execute_async({Operation::Delete, "key", {}}, unused.callback());
         require(reached_io && written.status == Status::IOError && read.status == Status::IOError &&
-                deleted.status == Status::IOError && rejected && rejected->status == Status::IOError,
+                deleted.status == Status::IOError && rejected && rejected->status == Status::IOError &&
+                rejected_read && rejected_read->status == Status::IOError &&
+                rejected_delete && rejected_delete->status == Status::IOError &&
+                engine.stats().applied_sequence == failed.applied_sequence,
                 "WAL failure acknowledged an async request");
+        require(!written.value.empty() && (diagnostic.empty() || written.value == diagnostic),
+                "async failure lost its diagnostic");
         require(failed.io_failed && failed.durable_sequence == 0 && failed.async_requests_inflight == 0 &&
                 failed.wal_durable_waiters == 0 && failed.wal_durable_waits_total == 3 &&
                 failed.wal_durable_wait_duration_ns_total > 0 && failed.async_callback_failures_total == 0 &&
@@ -391,6 +405,17 @@ void wal_failures_complete_callbacks() {
                 "WAL failure lost/doubled callbacks or confused callback and I/O failures");
         must_fail([&] { engine.close(); }, "close hid async WAL failure");
         require(engine.stats().async_requests_inflight == 0, "failed close returned before callbacks were released");
+        if (failure_point == "wal.write") {
+            std::ifstream file(dir.path + "/wal.v1", std::ios::binary);
+            const std::string wal{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+            require(wal == codec::wal_file_header(), "pre-write async failure or close appended a WAL record");
+            config.io_hook = {};
+            Engine recovered(config);
+            require(recovered.execute({Operation::Get, "key", {}}).status == Status::NotFound &&
+                    recovered.execute({Operation::Get, "later", {}}).status == Status::NotFound &&
+                    recovered.durable_sequence() == 0 && !recovered.stats().io_failed,
+                    "recovery exposed an async failed/rejected write or retained terminal state");
+        }
     }
 }
 

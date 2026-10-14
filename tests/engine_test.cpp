@@ -441,20 +441,46 @@ void close_completes_request_waits() {
 }
 
 void wal_failures() {
-    for (const std::string point : {"wal.write", "wal.sync"}) {
+    for (const auto& fault : std::vector<std::pair<std::string, std::string>>{
+             {"wal.write", "injected disk failure"}, {"wal.sync", "injected disk failure"},
+             {"wal.write", ""}, {"wal.sync", ""}}) {
+        const auto& point = fault.first;
+        const auto& diagnostic = fault.second;
         TempDir dir;
         auto config = config_for(dir);
         std::atomic<bool> armed{false};
         config.io_hook = [&](const std::string& operation) {
-            if (armed && operation == point) throw std::runtime_error("injected disk failure");
+            if (armed && operation == point) throw std::runtime_error(diagnostic);
         };
         Engine engine(config);
         armed = true;
-        require(engine.execute({Operation::Put, "key", "value"}).status == Status::IOError, "failed WAL write was acknowledged");
-        require(engine.durable_sequence() == 0, "failed sync advanced durable sequence");
+        auto writing = std::async(std::launch::async, [&] { return engine.execute({Operation::Put, "key", "value"}); });
+        const bool completed = writing.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+        // A regression must fail promptly rather than leave a future waiting
+        // forever for a commit whose failed batch has already been discarded.
+        if (!completed) { try { engine.close(); } catch (const std::exception&) {} }
+        const auto written = writing.get();
+        require(completed, "WAL failure did not wake the reliable writer before shutdown");
+        require(written.status == Status::IOError && !written.value.empty() &&
+                (diagnostic.empty() || written.value == diagnostic), "failed WAL write was acknowledged or lost its diagnostic");
+        const auto failed = engine.stats();
+        require(failed.io_failed && failed.durable_sequence == 0 && failed.wal_commit_failures_total == 1,
+                "WAL failure did not latch terminal state or advanced durable sequence");
         require(engine.execute({Operation::Put, "next", "value"}).status == Status::IOError, "writes continued after storage failure");
+        require(get(engine, "key").status == Status::IOError &&
+                engine.execute({Operation::Delete, "key", {}}).status == Status::IOError &&
+                engine.stats().applied_sequence == failed.applied_sequence,
+                "reads or deletes bypassed terminal storage failure");
         must_fail([&] { engine.snapshot(); }, "snapshot discarded a failed WAL");
         must_fail([&] { engine.close(); }, "shutdown hid the storage failure");
+        if (point == "wal.write") {
+            require(read_file(dir.path + "/wal.v1") == codec::wal_file_header(), "pre-write failure or close appended a WAL record");
+            config.io_hook = {};
+            Engine recovered(config);
+            require(get(recovered, "key").status == Status::NotFound && get(recovered, "next").status == Status::NotFound &&
+                    recovered.durable_sequence() == 0 && !recovered.stats().io_failed,
+                    "recovery exposed a failed/rejected write or retained terminal state");
+        }
     }
 }
 
