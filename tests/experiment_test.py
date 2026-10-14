@@ -43,6 +43,13 @@ control = json.loads((fixtures / "control.json").read_text())
 pid = os.getpid()
 (fixtures / "pids" / (str(pid) + ".json")).write_text(json.dumps({"pid": pid, "role": role, "script": str(Path(__file__).resolve())}))
 
+def publish_json(path, value):
+    # Stats can run while the benchmark publishes its fixed-arrival result.
+    # Readers must see either no report or a complete JSON document.
+    pending = path.with_name(path.name + ".tmp")
+    pending.write_text(json.dumps(value))
+    pending.replace(path)
+
 def stop(signum, frame):
     marker = fixtures / "stops" / (str(pid) + ".json")
     event = {"pid": pid, "role": role, "signal": signum, "entered_ns": time.monotonic_ns()}
@@ -66,13 +73,17 @@ if role == "engine":
     data = Path(os.environ["MINIKV_DATA_DIR"])
     data.mkdir(parents=True, exist_ok=True)
     (data / "fake-storage").write_text("isolated test data")
+    # A port identifies a currently listening process, not a measurement. Keep
+    # markers in the runner's unique data directory when later runs reuse ports.
+    measurement = data / "fixture-state"
+    measurement.mkdir()
     state = {"mode": os.environ["MINIKV_WAL_MODE"], "snapshot_ms": int(os.environ["MINIKV_SNAPSHOT_INTERVAL_MS"]), "started": time.monotonic(),
              "workers": int(os.environ.get("MINIKV_WORKERS", "20")),
              "queue": int(os.environ.get("MINIKV_REQUEST_QUEUE_SIZE", "128")),
              "connections": int(os.environ.get("MINIKV_MAX_CONNECTIONS", "256")),
              "wal_queue": int(os.environ.get("MINIKV_WAL_QUEUE_BYTES", "16777216")),
-             "data_capacity": os.environ.get("MINIKV_MAX_DATA_BYTES")}
-    (fixtures / ("engine-" + str(address[1]) + ".json")).write_text(json.dumps(state))
+             "data_capacity": os.environ.get("MINIKV_MAX_DATA_BYTES"), "measurement": str(measurement)}
+    publish_json(fixtures / ("engine-" + str(address[1]) + ".json"), state)
     with socket.socket() as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(address)
@@ -85,6 +96,9 @@ elif role == "gateway":
     host, port = os.environ["MINIKV_HTTP_ADDR"].rsplit(":", 1)
     engine_port = os.environ["MINIKV_ENGINE_ADDR"].rsplit(":", 1)[1]
     state = json.loads((fixtures / ("engine-" + engine_port + ".json")).read_text())
+    measurement = Path(state["measurement"])
+    # Publish the active mapping before readiness can let the bench start.
+    publish_json(fixtures / ("gateway-" + port + ".json"), {"measurement": str(measurement)})
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -107,7 +121,7 @@ elif role == "gateway":
                     "wal_queue_capacity_bytes": state["wal_queue"], "wal_commits_total": 0, "wal_commit_failures_total": 0,
                     "wal_commit_duration_ns_total": 0, "wal_commit_last_duration_ns": 0,
                     "snapshot_successes_total": snapshots,
-                    "snapshot_failures_total": int(bool(control.get("snapshot_failure")) and (fixtures / ("benchmark-started-" + port)).exists()),
+                    "snapshot_failures_total": int(bool(control.get("snapshot_failure")) and (measurement / "benchmark-started").exists()),
                     "snapshot_in_progress": False, "snapshot_sequence": 0,
                     "snapshot_capture_duration_ns_total": 0, "snapshot_write_duration_ns_total": 0,
                     "snapshot_compact_duration_ns_total": 0, "io_failed": False, "stopping": False,
@@ -125,13 +139,13 @@ elif role == "gateway":
             if state["data_capacity"] is not None and not control.get("omit_data_stats"):
                 payload["engine"].update(data_capacity_bytes=int(state["data_capacity"]), data_bytes=0, data_rejections_total=0)
                 payload["engine"].update(control.get("data_stats", {}))
-                if (fixtures / ("benchmark-started-" + port)).exists():
+                if (measurement / "benchmark-started").exists():
                     payload["engine"].update(control.get("data_stats_after", {}))
                     for field in control.get("missing_data_stats_after", []):
                         payload["engine"].pop(field, None)
                 for field in control.get("missing_data_stats", []):
                     payload["engine"].pop(field, None)
-            fixed_path = fixtures / ("fixed-report-" + port + ".json")
+            fixed_path = measurement / "fixed-report.json"
             if fixed_path.exists():
                 fixed = json.loads(fixed_path.read_text())
                 report = fixed["report"]
@@ -142,7 +156,7 @@ elif role == "gateway":
                 payload["engine"].update(applied_sequence=sequence, durable_sequence=sequence)
                 payload["server"]["requests_inflight"] = int(waiting)
                 payload["gateway"]["rpc"]["pool_in_use"] = int(waiting)
-                stale_marker = fixtures / ("stale-quiet-" + port)
+                stale_marker = measurement / "stale-quiet"
                 if control.get("stale_quiet_first") and not stale_marker.exists():
                     stale_marker.touch()
                     payload["server"]["requests_inflight"] = 0
@@ -164,7 +178,10 @@ elif role == "bench":
     parser.add_argument("-preload", default="true")
     args = vars(parser.parse_args())
     (fixtures / "pids" / (str(pid) + ".args.json")).write_text(json.dumps(args))
-    (fixtures / ("benchmark-started-" + str(urlsplit(args["url"]).port))).touch()
+    port = str(urlsplit(args["url"]).port)
+    measurement = Path(json.loads((fixtures / ("gateway-" + port + ".json")).read_text())["measurement"])
+    (measurement / "benchmark-started").touch()
+    (fixtures / "pids" / (str(pid) + ".started")).touch()
     if control.get("replace_sources") and not (fixtures / "sources-replaced").exists():
         for name in ("engine", "gateway", "bench"):
             (fixtures / name).write_text("#!" + sys.executable + "\nraise SystemExit(93)\n")
@@ -255,8 +272,8 @@ elif role == "bench":
                        system_success_rate_pct=(count-failures)*100/count if count else 0,
                        qps_total=count*1000000000/payload["elapsed_ns"],
                        qps_successful=(count-failures)*1000000000/payload["elapsed_ns"])
-        (fixtures / ("fixed-report-" + str(urlsplit(args["url"]).port) + ".json")).write_text(json.dumps({
-            "report": payload, "ready_at": time.monotonic() + control.get("delayed_apply", 0)}))
+        publish_json(measurement / "fixed-report.json", {
+            "report": payload, "ready_at": time.monotonic() + control.get("delayed_apply", 0)})
     print(json.dumps(payload))
     if behavior == "trailing_json":
         print("{}")
@@ -265,6 +282,27 @@ elif role == "bench":
     sys.exit(control.get("bench_exit", 1 if behavior == "exit_failure" or lossy else 0))
 else:
     raise RuntimeError("unknown fixture role")
+'''
+
+
+# Exercise valid endpoint reuse without relying on the OS to choose the same
+# ephemeral ports by chance. The real runner still starts and reaps each child.
+REUSED_PORTS_DRIVER = r'''
+import sys
+sys.path.insert(0, sys.argv.pop(1))
+import experiment
+
+original_ports = experiment.ports
+selected_ports = None
+
+def reused_ports():
+    global selected_ports
+    if selected_ports is None:
+        selected_ports = original_ports()
+    return selected_ports
+
+experiment.ports = reused_ports
+raise SystemExit(experiment.main())
 '''
 
 
@@ -338,7 +376,8 @@ try:
                 records[record['role']] = record
             # The benchmark marker is written after its SIGTERM disposition
             # is installed; listening engine/gateway have already done so too.
-            if set(records) == {'engine', 'gateway', 'bench'} and any(fixtures.glob('benchmark-started-*')):
+            if (set(records) == {'engine', 'gateway', 'bench'} and
+                    (fixtures / 'pids' / (str(records['bench']['pid']) + '.started')).exists()):
                 break
             if runner.poll() is not None or time.monotonic() >= deadline:
                 raise RuntimeError('runner did not reach three ready children')
@@ -543,8 +582,8 @@ class ExperimentRunnerTests(unittest.TestCase):
                 self.invoke(control=control, extra=("--max-data-bytes", "1024") + extra, expected=1)
                 index = json.loads((self.output / "index.json").read_text())
                 for result in index["runs"]:
-                    self.assertEqual(result["status"], "failed")
-                    self.assertTrue(any("data capacity" in error for error in result["errors"]))
+                    self.assertEqual(result["status"], "failed", result)
+                    self.assertTrue(any("data capacity" in error for error in result["errors"]), result)
                     run = self.output / result["name"]
                     samples = [json.loads(line) for line in (run / "stats.jsonl").read_text().splitlines()]
                     if "missing_data_stats_after" in control:
@@ -561,12 +600,43 @@ class ExperimentRunnerTests(unittest.TestCase):
                              "data_stats_after": {"data_rejections_total": 1}},
                     extra=("--max-data-bytes", "1024", "--rate", "100", "--op", "put"), expected=1)
         index = json.loads((self.output / "index.json").read_text())
-        self.assertEqual(index["degraded_runs"], 2)
-        self.assertEqual(index["failed_runs"], 0)
+        self.assertEqual(index["degraded_runs"], 2, index)
+        self.assertEqual(index["failed_runs"], 0, index)
         for result in index["runs"]:
-            self.assertEqual(result["status"], "degraded")
-            self.assertEqual(result["errors"], [])
-            self.assertEqual(result["metrics"]["failures"], 1)
+            self.assertEqual(result["status"], "degraded", result)
+            self.assertEqual(result["errors"], [], result)
+            self.assertEqual(result["metrics"]["failures"], 1, result)
+
+    def test_reused_ports_do_not_reuse_fixture_measurement_state(self):
+        original_command = self.runner_command
+
+        def command(extra=()):
+            return [sys.executable, "-c", REUSED_PORTS_DRIVER, str(ROOT / "benmark")] + original_command(extra)[2:]
+
+        with mock.patch.object(self, "runner_command", side_effect=command):
+            self.invoke(control={"service_failures": 1, "committed_writes": 8,
+                                 "data_stats_after": {"data_rejections_total": 1}},
+                        extra=("--max-data-bytes", "1024", "--rate", "100", "--op", "put", "--repeats", "2"),
+                        expected=1)
+        index = json.loads((self.output / "index.json").read_text())
+        self.assertEqual(index["degraded_runs"], 4, index)
+        self.assertEqual(index["failed_runs"], 0, index)
+        addresses = set()
+        data_directories = set()
+        for result in index["runs"]:
+            self.assertEqual(result["errors"], [], result)
+            run = self.output / result["name"]
+            commands = json.loads((run / "commands.json").read_text())
+            addresses.add(commands["gateway"]["environment"]["MINIKV_HTTP_ADDR"])
+            data_directories.add(commands["engine"]["environment"]["MINIKV_DATA_DIR"])
+            before = json.loads((run / "stats-before.json").read_text())["engine"]
+            after = json.loads((run / "stats-settled.json").read_text())["engine"]
+            self.assertEqual((before["applied_sequence"], before["durable_sequence"], before["data_rejections_total"]),
+                             (0, 0, 0), before)
+            self.assertEqual((after["applied_sequence"], after["durable_sequence"], after["data_rejections_total"]),
+                             (8, 8, 1), after)
+        self.assertEqual(len(addresses), 1, "the fixture never exercised HTTP port reuse")
+        self.assertEqual(len(data_directories), 4, "the runs did not use distinct data directories")
 
     def test_matrix_keeps_reports_logs_stats_and_private_data_separate(self):
         self.invoke(extra=("--modes", "throughput,reliable"), expected=0)
