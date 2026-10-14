@@ -723,8 +723,10 @@ int main(int argc, char** argv) {
         config.wal_mode = mode == "reliable" ? WalMode::Reliable : WalMode::Throughput;
         config.wal_batch_size = env_int("MINIKV_WAL_BATCH_SIZE", 512, 1, 65536);
         config.wal_queue_bytes = env_int("MINIKV_WAL_QUEUE_BYTES", 16 * 1024 * 1024, 2 * 1024 * 1024, 1024 * 1024 * 1024);
-        config.wal_flush_interval = std::chrono::milliseconds(env_int("MINIKV_WAL_FLUSH_MS", 100, 1, 60000));
-        config.snapshot_interval = std::chrono::milliseconds(env_int("MINIKV_SNAPSHOT_INTERVAL_MS", 1200000, 0, 86400000));
+        config.wal_flush_interval = std::chrono::milliseconds(env_int(
+            "MINIKV_WAL_FLUSH_MS", 100, 1, static_cast<int>(kMaxWalFlushInterval.count())));
+        config.snapshot_interval = std::chrono::milliseconds(env_int(
+            "MINIKV_SNAPSHOT_INTERVAL_MS", 1200000, 0, static_cast<int>(kMaxSnapshotInterval.count())));
         // Recovery may repair or upgrade files. Reject malformed server settings
         // before opening storage, while import continues to ignore them entirely.
         std::optional<ServerConfig> server_config;

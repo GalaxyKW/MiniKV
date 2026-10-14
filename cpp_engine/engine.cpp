@@ -363,7 +363,8 @@ std::string snapshot_header(uint64_t sequence, uint64_t size) {
 
 Engine::Engine(EngineConfig config) : config_(std::move(config)) {
     if (config_.data_dir.empty() || config_.wal_batch_size == 0 || config_.wal_flush_interval.count() <= 0 ||
-        config_.snapshot_interval.count() < 0 || config_.max_async_requests == 0 ||
+        config_.wal_flush_interval > kMaxWalFlushInterval || config_.snapshot_interval.count() < 0 ||
+        config_.snapshot_interval > kMaxSnapshotInterval || config_.max_async_requests == 0 ||
         config_.wal_queue_bytes < kMaxKeySize + kMaxValueSize + codec::kWalRecordHeader + 4) {
         throw std::invalid_argument("invalid engine configuration");
     }

@@ -16,6 +16,10 @@ namespace minikv {
 
 constexpr uint32_t kMaxKeySize = 4096;
 constexpr uint32_t kMaxValueSize = 1024 * 1024;
+// Bound public EngineConfig and server settings before converting millisecond
+// intervals to steady_clock deadlines in background workers.
+constexpr std::chrono::milliseconds kMaxWalFlushInterval{60000};
+constexpr std::chrono::milliseconds kMaxSnapshotInterval{86400000};
 
 enum class Operation : uint8_t { Put = 1, Get = 2, Delete = 3, Stats = 4 };
 enum class Status : uint8_t { Ok = 0, Value = 1, NotFound = 2, Invalid = 3, IOError = 4, Busy = 5 };
@@ -42,8 +46,8 @@ struct EngineConfig {
     size_t max_async_requests = 148;
     // Live key/value bytes only; zero leaves the logical dataset unlimited.
     uint64_t max_data_bytes = 0;
-    std::chrono::milliseconds wal_flush_interval{100};
-    std::chrono::milliseconds snapshot_interval{20 * 60 * 1000};
+    std::chrono::milliseconds wal_flush_interval{100}; // 1 ms .. kMaxWalFlushInterval
+    std::chrono::milliseconds snapshot_interval{20 * 60 * 1000}; // 0 disables; otherwise <= kMaxSnapshotInterval
     // Tests can fail or terminate at an actual I/O boundary. Must be thread-safe:
     // WAL and snapshot callbacks may run concurrently. Unset in the server.
     std::function<void(const std::string&)> io_hook;

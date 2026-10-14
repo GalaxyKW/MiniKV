@@ -8,6 +8,7 @@
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <sys/resource.h>
 #include <sys/wait.h>
@@ -651,6 +652,89 @@ void exclusive_directory_and_legacy_import() {
     must_fail([&] { Engine second(config); }, "two engines opened the same data directory");
 }
 
+void invalid_intervals_preserve_storage() {
+    using Milliseconds = std::chrono::milliseconds;
+    struct InvalidInterval {
+        const char* name;
+        bool flush;
+        Milliseconds value;
+    };
+    // Keep explicit supported boundaries here so changing a shared constant
+    // cannot silently expand the accepted API configuration range.
+    const std::vector<InvalidInterval> invalid = {
+        {"flush above maximum", true, Milliseconds(60001)},
+        {"flush representation maximum", true, Milliseconds::max()},
+        {"negative flush", true, Milliseconds(-1)},
+        {"zero flush", true, Milliseconds(0)},
+        {"snapshot above maximum", false, Milliseconds(86400001)},
+        {"snapshot representation maximum", false, Milliseconds::max()},
+        {"negative snapshot", false, Milliseconds(-1)},
+    };
+    const auto contents = [](const std::string& path) {
+        std::map<std::string, std::string> result;
+        if (fs::exists(path)) {
+            for (const auto& entry : fs::directory_iterator(path)) {
+                result.emplace(entry.path().filename().string(), read_file(entry.path().string()));
+            }
+        }
+        return result;
+    };
+    for (const auto* layout : {"new", "binary", "legacy"}) {
+        TempDir dir;
+        auto base = config_for(dir);
+        base.data_dir += "/uncreated/data";
+        if (std::string(layout) != "new") fs::create_directories(base.data_dir);
+        if (std::string(layout) == "binary") {
+            {
+                Engine engine(base);
+                put(engine, "preserved", "value");
+                engine.close();
+            }
+            // A valid startup would repair this tail. Invalid configuration
+            // must be rejected before opening or recovering the existing WAL.
+            const auto path = base.data_dir + "/wal.v1";
+            write_file(path, read_file(path) + "M");
+        } else if (std::string(layout) == "legacy") {
+            write_file(base.data_dir + "/data.db", "preserved:old\n");
+            write_file(base.data_dir + "/wal.log", "PUT preserved value\n");
+            base.import_legacy = true;
+        }
+        const auto before = contents(base.data_dir);
+        for (const auto& test : invalid) {
+            auto config = base;
+            if (test.flush) config.wal_flush_interval = test.value;
+            else config.snapshot_interval = test.value;
+            bool rejected = false;
+            try { Engine engine(config); engine.close(); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            require(rejected, std::string(test.name) + " accepted for " + layout + " storage");
+            require(contents(base.data_dir) == before, std::string(test.name) + " changed " + layout + " storage");
+            if (std::string(layout) == "new") {
+                require(!fs::exists(dir.path + "/uncreated"), "invalid interval created a data directory");
+            }
+        }
+    }
+}
+
+void maximum_intervals_close_without_waiting() {
+    TempDir dir;
+    auto config = config_for(dir);
+    config.wal_mode = WalMode::Throughput;
+    config.wal_flush_interval = std::chrono::seconds(60);
+    config.snapshot_interval = std::chrono::hours(24);
+    {
+        Engine engine(config);
+        put(engine, "pending", "value");
+        // close must notify both timers and durably flush the pending write;
+        // the enclosing CTest deadline catches waiting for either interval.
+        engine.close();
+    }
+    config.snapshot_interval = std::chrono::milliseconds(0);
+    Engine reopened(config);
+    require(get(reopened, "pending").value == "value", "maximum intervals lost the shutdown flush");
+    reopened.close();
+}
+
 int main(int argc, char** argv) {
     try {
         const std::vector<std::pair<const char*, void(*)()>> tests = {
@@ -667,6 +751,8 @@ int main(int argc, char** argv) {
             {"in-flight WAL acknowledgements", in_flight_wal_preserves_reliable_acknowledgements},
             {"in-flight WAL close", close_drains_in_flight_and_queued_wal},
             {"shutdown request waits", close_completes_request_waits},
+            {"invalid intervals preserve storage", invalid_intervals_preserve_storage},
+            {"maximum intervals close", maximum_intervals_close_without_waiting},
         };
         size_t executed = 0;
         for (const auto& test : tests) {

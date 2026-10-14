@@ -53,7 +53,7 @@ make docs-test
 | 快照输出与恢复 | 跨多个输出缓冲的小记录、大记录、空值与 NUL，逐记录 CRC 对账并在 WAL 只有文件头时恢复；真实快照短写/EFBIG 后保留旧文件、继续可靠写入并重启 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 快照计量 | 捕获持锁计时不包含门控 WAL 同步；快照与后缀写入量和实际文件对账；部分写、同步或安装后失败保留准确计数 | [stats_test.cpp](../tests/stats_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 故障边界 | WAL/快照 I/O 故障注入、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
-| HTTP 与 RPC | 参数与状态码映射、非法查询串不执行后端操作、合法慢上传的响应预算、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
+| HTTP 与 RPC | 参数与状态码映射、非法查询串与显式 null 字段不执行后端操作、合法慢上传的响应预算、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
 | 网关 HTTP 接纳 | 慢上传在解码前占名额、RPC 池前等待者受限；定长/chunked/100-continue 的未发送正文仍能收到拒绝；响应写入、取消、panic 与名额归还；数据和状态路由独立 | [admission_test.go](../go_server/admission_test.go)、[端到端测试](../tests/integration_test.py) |
 | 运行状态 | WAL 队列与写盘批次区分、容量与可靠确认等待、任务排队计时、失败唤醒与重启归零；RPC 等待与重试、基础字段缺失或 null 不补零、旧引擎可选字段的透传语义 | [engine_test.cpp](../tests/engine_test.cpp)、[stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
 | 压测结果分类 | 同时检查 HTTP 状态和响应格式、正常未命中分类、关闭预热、预热失败处理；并发聚合中成功、失败、未命中与网络错误的计数守恒 | [main_test.go](../benmark/main_test.go) |
@@ -70,7 +70,7 @@ make docs-test
 
 HTTP 接纳测试使用真实 RPC 客户端与阻塞的 `net.Pipe` 后端，确认一个 RPC 名额配三个 HTTP 名额时仅有三个调用进入 RPC 层，其余 64 个并发请求在读取正文前拒绝。真实 TCP 测试只发送 POST 请求头，让慢上传占住名额，再检查额外小/大正文请求及时收到完整 503、`/stats` 可查询、拒绝未增加数据 RPC 次数，以及断连后名额回收和正常读写恢复。它验证应用处理请求有上限，不声称测得 RSS 上限或任何网络环境都能收到拒绝响应。
 
-启动检查对每项服务器参数分别验证：配置无效时不创建新数据目录，也不改动既有旧格式文件；导入命令仍忽略服务器专用参数。WAL 兼容测试中的固定文件来自 `6407aa7`，覆盖空日志与检查点后继续写入、删除及 NUL 值，不依赖当前编码器重新生成旧格式样本。
+启动检查对每项服务器参数分别验证：配置无效时不创建新数据目录，也不改动既有旧格式文件；导入命令仍忽略服务器专用参数。存储单测直接构造 `EngineConfig`，验证时间间隔超界、负值和极大值在打开数据前拒绝，最大合法间隔仍能正常启动与关闭。HTTP 端到端测试确认 null 字段（包括重复字段中的 null）被拒绝后原值和日志序列不变，重启后原值仍可读，省略 value 和显式空字符串仍可写入。WAL 兼容测试中的固定文件来自 `6407aa7`，覆盖空日志与检查点后继续写入、删除及 NUL 值，不依赖当前编码器重新生成旧格式样本。
 
 旧文本导入测试覆盖 4096 字节 key、1 MiB value 的精确边界和多一个字节的拒绝，保留 NUL、CR、空值以及超长但可跳过的 WAL 空白。测试还使用自定义 C++ locale 核对原格式语义。`filesystem_test` 单独通过链接器的 `--wrap=read` 统计指定测试文件 inode 的实际读取量：对 4 MiB 超长字段，要求在大小上限加读取块余量内停止，且源文件不变、没有安装二进制文件。这个断言能区分提前拒绝和读完整行后才拒绝；不依赖耗时或 RSS 阈值，也不对 ASan 进程施加地址空间上限。生产引擎不链接该探针。
 
