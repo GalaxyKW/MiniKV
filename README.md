@@ -13,7 +13,7 @@ MiniKV 从内存数据结构、二进制协议到 HTTP 服务实现了一套单�
 | 持久化与恢复 | 两种确认语义、批量同步、CRC 与序列检查、快照及 WAL 回收 | [存储设计](docs/design.md) |
 | 备份检查 | 离线只读验证快照与 WAL，区分完整数据、可修复尾部和损坏 | [检查备份](docs/usage.md#离线检查备份) |
 | 并发与资源控制 | HTTP 解码前接纳限制、`epoll` 收发、有界队列、异步可靠确认、断连后保留请求名额、可选数据字节上限 | [网关配置](docs/usage.md#网关)、[请求生命周期](docs/design.md#异步可靠确认与请求生命周期)、[数据容量](docs/design.md#数据集容量) |
-| 工程验证 | I/O 故障注入、安装边界退出、重启对账、跨进程与数据竞争检查 | [测试指南](docs/testing.md) |
+| 工程验证 | I/O 故障注入、安装边界退出、重启对账、协议 fuzz、跨进程与数据竞争检查 | [测试指南](docs/testing.md) |
 | 性能分析 | 独立状态查询、确定性负载、重复实验、原始结果与资源采样归档 | [版本对照](docs/performance-async-controls.md) |
 
 当前面向 **Linux、单机、全量内存数据集**。尚无事务、复制、鉴权、TLS 或内存淘汰。可通过 `MINIKV_MAX_DATA_BYTES` 限制当前 key/value 的总字节数，默认不限；这是逻辑数据量上限，进程内存还包含容器、在途请求和快照副本。
@@ -157,10 +157,11 @@ make sanitize-test
 | 快照保留并发写入，失败可辨识 | 暂停快照、检查 WAL 后缀、短写/EFBIG、安装边界退出与重复恢复：[存储测试](tests/engine_test.cpp)、[快照测试](tests/snapshot_test.cpp) |
 | 数据容量限制不改变已接纳数据 | 精确字节边界、并发额度竞争、等待后重查、无副作用拒绝和恢复检查：[容量测试](tests/data_limit_test.cpp) |
 | HTTP、RPC 和两个进程协同工作 | 参数、超时、重试、分片、RST、过载、断连名额、SIGKILL 后恢复：[Go 测试](go_server/)、[端到端测试](tests/integration_test.py) |
+| 二进制解析符合字节与长度约定 | 独立格式及 CRC 校验、合法与损坏语料、随机变异、分片读取与单帧消费：[协议 fuzz](docs/testing.md#协议-fuzz-检查) |
 | 并发返回值和恢复状态能由同一历史解释 | 检查真实 PUT/GET/DELETE 调用区间、覆盖与删除结果，再加入 SIGKILL 重启后的读取：[历史校验与边界](docs/testing.md#并发历史与重启验证) |
 | 指标和实验报告可以信任 | 状态不改变提交语义；报告计数与 LSN 对账，保留失败与缺失轮次：[统计测试](tests/stats_test.cpp)、[实验测试](tests/experiment_test.py)、[汇总测试](tests/experiment_summary_test.py) |
 
-[CI](.github/workflows/ci.yml) 配置了这两组命令：普通回归包含 Go race 检查，sanitizer 回归使用 C++ AddressSanitizer / UndefinedBehaviorSanitizer。测试使用临时数据目录和本机临时端口；进程退出测试不等同于真实断电测试。单项检查、手动 ThreadSanitizer 和各测试的覆盖边界见[测试指南](docs/testing.md)。
+[CI](.github/workflows/ci.yml) 配置了这两组命令，并独立运行 `make fuzz-test`：普通回归包含 Go race 检查，sanitizer 回归使用 C++ AddressSanitizer / UndefinedBehaviorSanitizer；fuzz 任务另需 Clang/libFuzzer，按独立格式约定核对随机输入。测试使用临时数据目录和本机临时端口；进程退出测试不等同于真实断电测试。单项检查、手动 ThreadSanitizer 和各测试的覆盖边界见[测试指南](docs/testing.md)。
 
 只修改文档时可运行 `make docs-test`，检查本地链接、标题锚点与 shell 示例语法；它也包含在 `make test` 中。检查不会启动服务或执行示例命令，不能替代实际运行验证，支持的 Markdown 写法见[文档维护说明](docs/testing.md#维护文档)。
 

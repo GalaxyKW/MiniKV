@@ -11,6 +11,18 @@ if(MINIKV_SANITIZERS)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
+option(MINIKV_FUZZING "Build codec fuzzing with Clang/libFuzzer and ASan/UBSan" OFF)
+if(MINIKV_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "MINIKV_FUZZING requires Clang with libFuzzer; use make cpp-fuzz-test FUZZ_CXX=clang++")
+    endif()
+    add_executable(codec_fuzz ../tests/codec_fuzz.cpp)
+    target_include_directories(codec_fuzz PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(codec_fuzz PRIVATE -O1 -g -Wall -Wextra -Wpedantic
+        -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all)
+    target_link_options(codec_fuzz PRIVATE -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all)
+endif()
+
 add_library(minikv_storage engine.cpp)
 target_include_directories(minikv_storage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(minikv_storage PUBLIC Threads::Threads)

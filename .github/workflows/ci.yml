@@ -15,3 +15,26 @@ jobs:
           cache: false
       - run: make test
       - run: make sanitize-test
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install Clang and libFuzzer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libclang-rt-18-dev
+      - run: make fuzz-test FUZZ_CXX=clang++-18
+      - name: Preserve failing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures
+          if-no-files-found: ignore
+          path: |
+            build-fuzz/artifacts/
+            go_server/testdata/fuzz/

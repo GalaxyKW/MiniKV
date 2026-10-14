@@ -15,14 +15,47 @@ make sanitize-test
 | `make docs-test` | 检查 README 与 `docs/` 中的本地内联链接、标题锚点和 shell 示例语法，并验证检查器本身；只需 Python 3.8+ 与 Bash，不构建或启动服务 |
 | `make history-test` | 验证并发历史校验器能接受合法重叠、拒绝陈旧读取与实时顺序冲突，搜索超限明确失败；只需 Python 3.8+，不启动服务 |
 | `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及七个测试程序；运行 C++ 测试，以及针对该引擎的离线检查与端到端测试 |
+| `make fuzz-test` | 用 Clang/libFuzzer、ASan/UBSan 检查 C++ 二进制 codec，再用 Go fuzz 检查 RPC 响应；每种语言默认随机运行 10 秒，另需种子检查与编译时间 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
 | `make check-test` | 构建引擎后验证 `--check` 的结果、退出码、锁与文件边界，以及检查前后文件内容和布局不变 |
 | `make experiment-test` | 使用 Python 标准库验证元数据采样、隔离实验、报告汇总、快照离线分析与子进程清理；不需要提前构建服务 |
 
-[CI 工作流](../.github/workflows/ci.yml) 在 push 和 pull request 时执行 `make test` 与 `make sanitize-test`。ThreadSanitizer 检查需要按下文手动运行。
+[CI 工作流](../.github/workflows/ci.yml) 在 push 和 pull request 时执行 `make test`、`make sanitize-test`，并在独立任务中执行 `make fuzz-test`。ThreadSanitizer 检查需要按下文手动运行。
 
 测试使用独立临时数据目录；网络测试在本机临时端口启动服务，因此执行环境必须允许监听本机端口。无需提前启动常驻的引擎或网关。
+
+## 协议 fuzz 检查
+
+随机变异测试另需带 libFuzzer、ASan 和 UBSan 运行库的 Clang。普通 `make test` 不依赖 Clang，但会执行 Go fuzz 的固定种子及已保存的失败用例。Ubuntu 24.04 可安装 `clang-18` 与 `libclang-rt-18-dev`，然后运行：
+
+```sh
+make fuzz-test FUZZ_CXX=clang++-18
+# 更长的随机运行，每种语言 60 秒；Go 同时使用两个 worker。
+make fuzz-test FUZZ_CXX=clang++-18 FUZZ_SECONDS=60 FUZZ_PARALLEL=2
+# 也可只运行一种语言。
+make cpp-fuzz-test FUZZ_CXX=clang++-18
+make go-fuzz-test
+```
+
+`FUZZ_SECONDS` 与 `FUZZ_PARALLEL` 必须是 1–2,147,483,647 范围内的十进制整数，避免 libFuzzer 的零时间预算或整数溢出变成无限运行。C++ 每个输入最多 1,052,706 字节，单个输入执行超时为 5 秒，RSS 检查阈值为 1 GiB；Go 输入最多容纳两条各带 1 MiB 正文的响应。时间预算用于 fuzz 运行，不包含构建等步骤，也不承诺命令在该时刻精确退出；CI fuzz 任务另设 10 分钟总超时。两种入口都只解析内存，不启动服务或读写数据库。
+
+| 入口 | 检查的契约 |
+| --- | --- |
+| [C++ codec](../tests/codec_fuzz.cpp) | 输入首字节选择请求、旧格式记录、WAL v2 记录、WAL 文件头或短记录头；独立解析字段并计算 CRC，检查接受/拒绝、操作和 key/value 字节，区分完整帧与不完整但可补全的前缀 |
+| [Go RPC 响应](../go_server/client_fuzz_test.go) | 独立核对 magic、保留位、状态及长度；直接读取和每次最多 3 字节读取的结果一致；非法头不读取正文，合法响应只消费一帧并保留后续字节 |
+
+[种子生成器](../tools/seed_codec_fuzz.py) 使用 Python `struct` 与 `zlib.crc32` 独立编码 C++ 语料，包含合法帧、二进制值、长度边界、截断与损坏，避免只在非法 magic 路径上变异。C++ 只捕获约定的 `runtime_error` 拒绝，合法输入被拒绝也会使测试失败；ASan、UBSan 错误会终止进程。序列连续性仍由恢复测试验证，单条记录 codec 允许序列 0。
+
+默认 C++ 构建、语料和失败样本位于 `build-fuzz/`。重复执行保留 fuzzer 新发现的语料；可用 `FUZZ_BUILD_DIR=build-fuzz-fresh` 开始独立运行。失败时 libFuzzer 将触发输入写入 `artifacts/`，可将其文件路径作为唯一参数重放。Go 将失败输入保存到 `go_server/testdata/fuzz/FuzzReadResponse/`，可按日志给出的用例名重放，例如：
+
+```sh
+# 将下列占位路径/用例名替换为失败日志中的实际值。
+./build-fuzz/codec_fuzz build-fuzz/artifacts/crash-HASH
+go test ./go_server -run='FuzzReadResponse/HASH'
+```
+
+CI 失败时上传上述两个位置的已有失败样本。定位并修复后，将最小复现补入固定种子或回归测试；不要仅删除触发样本。Go 随机运行的覆盖语料还保存在 Go 构建缓存中，其行为见 [Go fuzz 文档](https://go.dev/doc/security/fuzz/)，C++ 参数见 [libFuzzer 文档](https://llvm.org/docs/LibFuzzer.html)。短时 fuzz 能扩大字节组合覆盖，不能证明解析器没有缺陷，也不验证完整恢复流程、网络调度或持久化并发。
 
 ## 维护文档
 
