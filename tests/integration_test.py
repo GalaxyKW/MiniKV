@@ -21,6 +21,7 @@ import zlib
 from urllib.parse import urlencode
 
 from history_checker import Operation as HistoryOperation, check_history
+from rpc_fault_proxy import ResponseGateProxy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -151,13 +152,13 @@ class MiniKVIntegration(unittest.TestCase):
         for log in self.log_files:
             log.close()
 
-    def request(self, method, key=None, value=None, body=None):
+    def request(self, method, key=None, value=None, body=None, timeout=4):
         path = "/kv"
         if method == "POST" and body is None:
             body = json.dumps({"key": key, "value": value}).encode()
         elif key is not None:
             path += "?" + urlencode({"key": key})
-        connection = http.client.HTTPConnection("127.0.0.1", self.http_port, timeout=4)
+        connection = http.client.HTTPConnection("127.0.0.1", self.http_port, timeout=timeout)
         try:
             connection.request(method, path, body, {"Content-Type": "application/json"})
             response = connection.getresponse()
@@ -872,6 +873,171 @@ class MiniKVIntegration(unittest.TestCase):
         self.start_gateway()
         for key, value in acknowledged.items():
             self.assertEqual(self.request("GET", key), (200, b"VALUE " + value.encode() + b"\n"))
+
+    def test_inflight_http_mutations_recover_before_and_after_wal_sync(self):
+        # Both branches leave real HTTP calls unresolved at SIGKILL. File bytes
+        # prove the first pair was not written; intercepted backend OK replies
+        # prove the second pair was durable without acknowledging either client.
+        for phase in ("queued_not_written", "durable_reply_lost"):
+            with self.subTest(phase=phase):
+                self.stop("gateway")
+                self.stop("engine")
+                self.engine_env.update({
+                    "MINIKV_DATA_DIR": str(Path(self.directory.name) / phase),
+                    "MINIKV_WAL_BATCH_SIZE": "64", "MINIKV_WAL_FLUSH_MS": "2",
+                    "MINIKV_SNAPSHOT_INTERVAL_MS": "0",
+                })
+                self.gateway_env.update({"MINIKV_ENGINE_ADDR": f"127.0.0.1:{self.engine_port}",
+                                         "MINIKV_RPC_TIMEOUT_MS": "15000"})
+                self.start_engine()
+                self.start_gateway()
+                for key, value in (("untouched", "stable"), ("overwrite", "old"),
+                                   ("delete", "old"), ("tombstone", "old")):
+                    self.assertEqual(self.request("POST", key, value), (200, b"OK\n"))
+                self.assertEqual(self.request("DELETE", "tombstone"), (200, b"OK\n"))
+                _, stats = self.runtime_stats()
+                base = stats["engine"]["applied_sequence"]
+                self.assertEqual(base, 5)
+                self.assertEqual(stats["engine"]["durable_sequence"], base)
+                self.stop("gateway")
+                if phase == "queued_not_written":
+                    self.stop("engine")
+                    self.engine_env.update({"MINIKV_WAL_BATCH_SIZE": "65536",
+                                            "MINIKV_WAL_FLUSH_MS": "60000"})
+                    self.start_engine()
+
+                calls, threads = [], []
+                lock = threading.Lock()
+
+                def start_call(method, key, value=None):
+                    call = {"method": method, "key": key, "value": value}
+                    calls.append(call)
+
+                    def client():
+                        with lock:
+                            call["started"] = time.monotonic_ns()
+                        try:
+                            result = self.request(method, key, value, timeout=15)
+                            outcome = {"result": result}
+                        except Exception as error:
+                            outcome = {"error": repr(error)}
+                        with lock:
+                            call.update(outcome, finished=time.monotonic_ns())
+
+                    thread = threading.Thread(target=client)
+                    threads.append(thread)
+                    thread.start()
+
+                with contextlib.ExitStack() as stack:
+                    proxy = None
+                    if phase == "durable_reply_lost":
+                        proxy = stack.enter_context(ResponseGateProxy(
+                            ("127.0.0.1", self.engine_port), keys={b"overwrite", b"delete"}))
+                        self.gateway_env["MINIKV_ENGINE_ADDR"] = f"127.0.0.1:{proxy.port}"
+                    try:
+                        self.start_gateway()
+                        directory = Path(self.engine_env["MINIKV_DATA_DIR"])
+                        before_files = {name: (directory / name).read_bytes()
+                                        for name in ("snapshot.v1", "wal.v1")}
+                        start_call("POST", "overwrite", "new")
+                        self.wait_stats(lambda s: s["engine"]["applied_sequence"] == base + 1,
+                                        "pending overwrite was not applied")
+                        start_call("DELETE", "delete")
+                        self.wait_stats(lambda s: s["engine"]["applied_sequence"] == base + 2,
+                                        "pending delete was not applied")
+                        if proxy is None:
+                            # An unrelated GET must wait for the same global
+                            # durable prefix, even though its own value is old.
+                            start_call("GET", "untouched")
+                            stats = self.wait_stats(
+                                lambda s: s["engine"]["wal_durable_waiters"] == 3 and
+                                s["engine"]["async_requests_inflight"] == 3,
+                                "unrelated GET did not join both writes at the durability barrier")
+                            state = stats["engine"]
+                            self.assertEqual(state["durable_sequence"], base)
+                            self.assertEqual(state["wal_queued_records"], 2)
+                            self.assertEqual(state["wal_inflight_bytes"], 0)
+                            self.assertGreater(state["wal_pending_bytes"], 0)
+                            self.engine.send_signal(signal.SIGSTOP)
+                            deadline = time.monotonic() + 2
+                            while True:
+                                stopped = os.waitid(os.P_PID, self.engine.pid,
+                                                    os.WSTOPPED | os.WNOHANG | os.WNOWAIT)
+                                if stopped is not None and stopped.si_code == os.CLD_STOPPED:
+                                    self.assertEqual(stopped.si_status, signal.SIGSTOP)
+                                    break
+                                self.assertIsNone(self.engine.poll(), "engine exited before SIGSTOP")
+                                self.assertLess(time.monotonic(), deadline, "engine did not stop")
+                                time.sleep(0.005)
+                            # Sampling Stats before SIGSTOP is not sufficient:
+                            # verify no background flush raced with the freeze.
+                            self.assertEqual({name: (directory / name).read_bytes()
+                                              for name in before_files}, before_files)
+                        else:
+                            responses = proxy.wait_for_responses(2, timeout=3)
+                            self.assertCountEqual(
+                                [(r.op, r.key, r.value, r.status, r.body) for r in responses],
+                                [(1, b"overwrite", b"new", 0, b""), (3, b"delete", b"", 0, b"")])
+                            self.wait_stats(lambda s: s["engine"]["durable_sequence"] == base + 2,
+                                            "held backend OK replies were not durable")
+                        with lock:
+                            self.assertTrue(all("started" in call and "finished" not in call
+                                                for call in calls), repr(calls))
+                        self.assertTrue(all(thread.is_alive() for thread in threads))
+                        crash = time.monotonic_ns()
+                        process = self.engine
+                        self.stop("engine", kill=True)
+                        self.assertEqual(process.returncode, -signal.SIGKILL)
+                        if proxy is not None:
+                            proxy.release()
+                        deadline = time.monotonic() + 5
+                        for thread in threads:
+                            thread.join(max(0, deadline - time.monotonic()))
+                        self.assertFalse(any(thread.is_alive() for thread in threads), repr(calls))
+                        for call in calls:
+                            self.assertNotIn("error", call, repr(calls))
+                            self.assertEqual(call["result"],
+                                             (502, b"Backend request failed; a write may already have executed\n"),
+                                             repr(calls))
+                            self.assertLess(call["started"], crash)
+                            self.assertLess(crash, call["finished"])
+                        if proxy is not None:
+                            # Keep listening until HTTP completion: an automatic
+                            # retry must be visible even with the engine dead.
+                            self.assertCountEqual(
+                                [(a.op, a.key, a.value) for a in proxy.attempts()
+                                 if a.op in (1, 3) and a.key in (b"overwrite", b"delete")],
+                                [(1, b"overwrite", b"new"), (3, b"delete", b"")])
+                            proxy.check_errors()
+                    finally:
+                        # SIGKILL also releases a stopped process on assertion
+                        # failures, before any attempt at graceful cleanup.
+                        self.stop("engine", kill=True)
+                        if proxy is not None:
+                            proxy.release()
+                        deadline = time.monotonic() + 5
+                        for thread in threads:
+                            thread.join(max(0, deadline - time.monotonic()))
+                        self.stop("gateway", kill=any(thread.is_alive() for thread in threads))
+                        for thread in threads:
+                            thread.join(timeout=2)
+                        self.assertFalse(any(thread.is_alive() for thread in threads), repr(calls))
+
+                self.engine_env.update({"MINIKV_WAL_BATCH_SIZE": "64", "MINIKV_WAL_FLUSH_MS": "2"})
+                self.gateway_env["MINIKV_ENGINE_ADDR"] = f"127.0.0.1:{self.engine_port}"
+                self.start_engine()
+                self.start_gateway()
+                _, stats = self.runtime_stats()
+                recovered = base if phase == "queued_not_written" else base + 2
+                self.assertEqual(stats["engine"]["applied_sequence"], recovered)
+                self.assertEqual(stats["engine"]["durable_sequence"], recovered)
+                expected = {"untouched": (200, b"VALUE stable\n"), "tombstone": (404, b"NOT_FOUND\n"),
+                            "overwrite": (200, b"VALUE old\n") if recovered == base else (200, b"VALUE new\n"),
+                            "delete": (200, b"VALUE old\n") if recovered == base else (404, b"NOT_FOUND\n")}
+                for key, result in expected.items():
+                    self.assertEqual(self.request("GET", key), result)
+                self.assertEqual(self.request("POST", "after-crash", "writable"), (200, b"OK\n"))
+                self.assertEqual(self.request("GET", "after-crash"), (200, b"VALUE writable\n"))
 
     def test_concurrent_history_and_recovery(self):
         # Each case has an empty dataset and no global data-capacity constraint,

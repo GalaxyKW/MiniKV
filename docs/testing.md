@@ -100,6 +100,7 @@ make docs-test
 | 快照离线分析 | 共同空闲窗口、预置与忙碌端点排除、覆盖门槛、旧字段缺失与真实零值、uint64 与累计倒退、最大值口径；保留无效轮次且不修改归档 | [experiment_snapshot_report_test.py](../tests/experiment_snapshot_report_test.py) |
 | 跨进程行为 | 空闲/不完整连接、TCP 分片与流水线、半关闭连接的发送背压、文件描述符耗尽后的接入恢复、1 MiB value、客户端 RST、非法帧、队列过载、停机丢弃未接纳输入并排空响应、SIGKILL 后恢复与混合负载 | [integration_test.py](../tests/integration_test.py) |
 | 并发历史与恢复 | 对真实 HTTP PUT/GET/DELETE 的完整历史搜索合法串行顺序，同时满足响应值和调用间实时先后关系；把 SIGKILL 后读回的状态纳入同一历史 | [校验器](../tests/history_checker.py)、[校验器测试](../tests/history_checker_test.py)、[端到端测试](../tests/integration_test.py) |
+| 在途请求与崩溃恢复 | 请求未返回时 SIGKILL，分别验证未写入 WAL 的变更丢失、已同步但响应丢失的变更保留；核对全局序列、异 key GET 等待和写入不重试 | [端到端测试](../tests/integration_test.py)、[响应门控代理](../tests/rpc_fault_proxy.py) |
 
 端到端测试还验证：可靠确认释放 worker，但继续占用请求名额；WAL 容量阻塞 worker、数据队列和网关 RPC 名额时，`/stats` 仍可返回；断连后旧请求不会释放名额供重连绕过限制；网络停机宽限结束后，异步回调仍能排空且数据可恢复。非法流水线帧后的未读输入不会截断之前的大 GET 响应，覆盖客户端保持写端开放和半关闭两种情况。引擎退出后可继续获取网关统计，重启后可读取恢复序列。JSON 压测报告中的写操作数会与真实引擎的日志序列增量交叉核对。
 
@@ -140,6 +141,25 @@ python3 tests/integration_test.py -v MiniKVIntegration.test_acknowledged_writes_
 ```
 
 上面的命令假定已经执行过 `make`。完整回归仍应使用 `make test`，确保其他受影响路径一并检查。
+
+## 在途请求与崩溃恢复
+
+端到端测试另用真实网关与引擎控制两个崩溃时点。两种情况都先成功确认一组基线操作，包含保留值、待覆盖值、待删除值和已删除 key；关闭自动快照，避免检查点改变观察到的 WAL 边界。HTTP 调用仍未完成时才发送 SIGKILL，随后要求收到真实的 502 响应，客户端异常、超时、504 或成功响应都会使测试失败。
+
+| 崩溃时点 | 如何确认时点 | 恢复后必须满足 |
+| --- | --- | --- |
+| 覆盖和删除已应用，但尚未写入 WAL | 将刷新间隔设为 60 秒，逐次观察全局应用序列；异 key 的 GET 也必须等待可靠确认。确认三个请求仍在等待后，SIGSTOP 并确认进程已停止，比较 WAL 和快照与基线完全相同，再 SIGKILL | 两个未确认变更均不存在，所有基线值和删除结果保持，应用与持久化序列等于基线 |
+| 覆盖和删除已同步，但响应未到达网关 | [测试代理](../tests/rpc_fault_proxy.py) 收到并扣住两个完整成功响应，核对持久化序列后 SIGKILL，再让代理以 EOF 结束连接 | 两个变更都保留，应用与持久化序列等于基线加二；每个写请求只向代理发送一次 |
+
+代理在 HTTP 调用结束前持续接入，并在连接上游前记录请求，因此引擎已退出也不会隐藏错误的写重试。它限制帧大小、连接数、记录数和等待时间，退出时关闭连接并回收线程；异常会使测试失败。恢复后还会再次可靠写入并读回，确认数据库可以继续使用。
+
+502 不能说明写入未执行：两种情况的客户端结果相同，恢复结果由测试端额外观察到的 WAL 边界确定。这个检查不把未知结果伪装成成功响应，也不逐 key 任意选择保留哪些写入；完整历史校验器仍只接收已完成历史。这里覆盖两个受控时点和可靠 GET 的全局等待，不覆盖任意未知结果历史或全部崩溃交错，也不模拟真实断电。
+
+```sh
+python3 tests/integration_test.py -v MiniKVIntegration.test_inflight_http_mutations_recover_before_and_after_wal_sync
+```
+
+该命令需要已经构建引擎与网关；同一用例也包含在 `make test` 和 `make sanitize-test` 中。
 
 ## 手动检查 C++ 数据竞争
 

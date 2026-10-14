@@ -159,6 +159,7 @@ make sanitize-test
 | HTTP、RPC 和两个进程协同工作 | 参数、超时、重试、分片、RST、过载、断连名额、SIGKILL 后恢复：[Go 测试](go_server/)、[端到端测试](tests/integration_test.py) |
 | 二进制解析符合字节与长度约定 | 独立格式及 CRC 校验、合法与损坏语料、随机变异、分片读取与单帧消费：[协议 fuzz](docs/testing.md#协议-fuzz-检查) |
 | 并发返回值和恢复状态能由同一历史解释 | 检查真实 PUT/GET/DELETE 调用区间、覆盖与删除结果，再加入 SIGKILL 重启后的读取：[历史校验与边界](docs/testing.md#并发历史与重启验证) |
+| 崩溃时未收到响应的写入有明确恢复边界 | 控制未写入 WAL 与已同步但响应丢失两种情况，检查全局序列、恢复值和写入不重试：[在途请求与崩溃恢复](docs/testing.md#在途请求与崩溃恢复) |
 | 指标和实验报告可以信任 | 状态不改变提交语义；报告计数与 LSN 对账，保留失败与缺失轮次：[统计测试](tests/stats_test.cpp)、[实验测试](tests/experiment_test.py)、[汇总测试](tests/experiment_summary_test.py) |
 
 [CI](.github/workflows/ci.yml) 配置了这两组命令，并独立运行 `make fuzz-test`：普通回归包含 Go race 检查，sanitizer 回归使用 C++ AddressSanitizer / UndefinedBehaviorSanitizer；fuzz 任务另需 Clang/libFuzzer，按独立格式约定核对随机输入。测试使用临时数据目录和本机临时端口；进程退出测试不等同于真实断电测试。单项检查、手动 ThreadSanitizer 和各测试的覆盖边界见[测试指南](docs/testing.md)。
