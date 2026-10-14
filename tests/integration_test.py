@@ -189,6 +189,36 @@ class MiniKVIntegration(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, message)
             time.sleep(0.005)
 
+    def test_null_json_fields_do_not_overwrite_persisted_values(self):
+        original = "keep\x00this\nvalue "
+        self.assertEqual(self.request("POST", "protected", original), (200, b"OK\n"))
+        _, before = self.runtime_stats()
+        bodies = (
+            b'{"key":"protected","value":null}',
+            b'{"key":"protected","key":null,"value":"changed"}',
+            b'{"key":null,"key":"protected","value":"changed"}',
+            b'{"key":"protected","value":"changed","value":null}',
+            b'{"key":"protected","value":null,"value":"changed"}',
+            b'{"key":"protected","VALUE":null}',
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                self.assertEqual(self.request("POST", body=body)[0], 400)
+                self.assertEqual(self.request("GET", "protected"), (200, b"VALUE " + original.encode() + b"\n"))
+        _, after = self.runtime_stats()
+        self.assertEqual(after["engine"]["applied_sequence"], before["engine"]["applied_sequence"])
+
+        # Missing value and an explicit empty string remain valid empty writes.
+        for body in (b'{"key":"empty"}', b'{"key":"empty","value":""}'):
+            self.assertEqual(self.request("POST", body=body), (200, b"OK\n"))
+            self.assertEqual(self.request("GET", "empty"), (200, b"VALUE \n"))
+        self.stop("gateway")
+        self.stop("engine")
+        self.start_engine()
+        self.start_gateway()
+        self.assertEqual(self.request("GET", "protected"), (200, b"VALUE " + original.encode() + b"\n"))
+        self.assertEqual(self.request("GET", "empty"), (200, b"VALUE \n"))
+
     def test_http_admission_precedes_body_reads_and_recovers_after_disconnect(self):
         self.stop("gateway")
         self.gateway_env["MINIKV_HTTP_MAX_INFLIGHT"] = "1"

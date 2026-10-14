@@ -16,9 +16,25 @@ import (
 	"time"
 )
 
-type KVRequest struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+// A missing value keeps its empty zero value, but every supplied field must be
+// a string. Validate each occurrence so duplicate fields cannot hide a null.
+type requestString string
+
+func (value *requestString) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return errors.New("request fields must be JSON strings")
+	}
+	var decoded string
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*value = requestString(decoded)
+	return nil
+}
+
+type kvRequestBody struct {
+	Key   requestString `json:"key"`
+	Value requestString `json:"value"`
 }
 
 type commandClient interface {
@@ -51,7 +67,7 @@ func newKVHandler(client commandClient) http.HandlerFunc {
 		case http.MethodPost:
 			// JSON escaping can expand one data byte into six source bytes.
 			r.Body = http.MaxBytesReader(w, r.Body, 6*(maxKeySize+maxValueSize)+1024)
-			var body KVRequest
+			var body kvRequestBody
 			decoder := json.NewDecoder(r.Body)
 			decoder.DisallowUnknownFields()
 			err := decoder.Decode(&body)
@@ -73,7 +89,7 @@ func newKVHandler(client commandClient) http.HandlerFunc {
 				}
 				return
 			}
-			request = rpcRequest{op: opPut, key: body.Key, value: body.Value}
+			request = rpcRequest{op: opPut, key: string(body.Key), value: string(body.Value)}
 		case http.MethodGet, http.MethodDelete:
 			query, err := url.ParseQuery(r.URL.RawQuery)
 			if err != nil {

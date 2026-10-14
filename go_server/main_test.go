@@ -33,7 +33,7 @@ func (client *fakeClient) execute(_ context.Context, request rpcRequest) (rpcRes
 func TestHTTPPreservesValueBytes(t *testing.T) {
 	key, value := "tenant:1 \n", " \nhello\x00\t\nDEL victim\n "
 	client := &fakeClient{response: rpcResponse{status: statusOK}}
-	body, _ := json.Marshal(KVRequest{Key: key, Value: value})
+	body, _ := json.Marshal(map[string]string{"key": key, "value": value})
 	response := httptest.NewRecorder()
 	newKVHandler(client).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/kv", strings.NewReader(string(body))))
 	if response.Code != http.StatusOK || client.request.key != key || client.request.value != value {
@@ -44,6 +44,57 @@ func TestHTTPPreservesValueBytes(t *testing.T) {
 	newKVHandler(client).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kv?key="+url.QueryEscape(key), nil))
 	if response.Code != http.StatusOK || response.Body.String() != "VALUE "+value+"\n" {
 		t.Fatalf("GET trimmed or changed value: %q", response.Body.String())
+	}
+}
+
+func TestHTTPRejectsNullFieldsBeforeBackendCall(t *testing.T) {
+	for _, test := range []struct{ name, body string }{
+		{"null_key", `{"key":null,"value":"new"}`},
+		{"null_value", `{"key":"victim","value":null}`},
+		{"null_with_whitespace", "{\"key\":\"victim\",\"value\": \t\n null \t\n }"},
+		{"both_null", `{"key":null,"value":null}`},
+		{"key_null_before_string", `{"key":null,"key":"victim","value":"new"}`},
+		{"key_null_after_string", `{"key":"victim","key":null,"value":"new"}`},
+		{"value_null_before_string", `{"key":"victim","value":null,"value":"new"}`},
+		{"value_null_after_string", `{"key":"victim","value":"new","value":null}`},
+		{"uppercase_key_null", `{"KEY":null,"value":"new"}`},
+		{"uppercase_value_null", `{"key":"victim","VALUE":null}`},
+		{"key_alias_null_before_string", `{"KEY":null,"key":"victim","value":"new"}`},
+		{"key_alias_null_after_string", `{"key":"victim","KEY":null,"value":"new"}`},
+		{"value_alias_null_before_string", `{"key":"victim","VALUE":null,"value":"new"}`},
+		{"value_alias_null_after_string", `{"key":"victim","value":"new","VALUE":null}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeClient{response: rpcResponse{status: statusOK}}
+			response := httptest.NewRecorder()
+			newKVHandler(client).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/kv", strings.NewReader(test.body)))
+			if response.Code != http.StatusBadRequest || client.calls != 0 {
+				t.Fatalf("null field reached backend: code=%d calls=%d request=%#v", response.Code, client.calls, client.request)
+			}
+		})
+	}
+}
+
+func TestHTTPStringFieldsPreserveCompatibility(t *testing.T) {
+	for _, test := range []struct{ name, body, key, value string }{
+		{"missing_value", `{"key":"key"}`, "key", ""},
+		{"empty_value", `{"key":"key","value":""}`, "key", ""},
+		{"normal_strings", `{"key":"key","value":"value"}`, "key", "value"},
+		{"nul_bytes", `{"key":"key\u0000","value":"\u0000value\u0000"}`, "key\x00", "\x00value\x00"},
+		{"literal_null", `{"key":"null","value":"null"}`, "null", "null"},
+		{"uppercase_aliases", `{"KEY":"key","VALUE":"value"}`, "key", "value"},
+		{"duplicate_strings", `{"key":"first","key":"second","value":"old","value":"new"}`, "second", "new"},
+		{"duplicate_aliases", `{"key":"first","KEY":"second","value":"old","VALUE":"new"}`, "second", "new"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeClient{response: rpcResponse{status: statusOK}}
+			response := httptest.NewRecorder()
+			newKVHandler(client).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/kv", strings.NewReader(test.body)))
+			want := rpcRequest{op: opPut, key: test.key, value: test.value}
+			if response.Code != http.StatusOK || client.calls != 1 || client.request != want {
+				t.Fatalf("string fields changed: code=%d calls=%d request=%#v want=%#v", response.Code, client.calls, client.request, want)
+			}
+		})
 	}
 }
 
