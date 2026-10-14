@@ -189,6 +189,73 @@ class MiniKVIntegration(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, message)
             time.sleep(0.005)
 
+    def test_mutable_reads_remain_fresh_through_a_response_cache(self):
+        # Model one origin within a heuristic freshness window. GET 200/404
+        # responses can be reused unless no-store forbids it. An unsafe success only
+        # invalidates its own complete URI: POST /kv does not invalidate a
+        # cached GET /kv?key=..., whereas DELETE uses that exact GET URI.
+        cached = {}
+        origin_requests = []
+        cache_hits = []
+
+        def through_cache(method, key, value=None):
+            uri = "/kv" if method == "POST" else "/kv?" + urlencode({"key": key})
+            if method == "GET" and uri in cached:
+                cache_hits.append(uri)
+                return cached[uri]
+            body = json.dumps({"key": key, "value": value}).encode() if method == "POST" else None
+            headers = {"Content-Type": "application/json"} if body is not None else {}
+            # No request cache directive, changing query, or special client
+            # behavior bypasses the cache; freshness must come from responses.
+            connection = http.client.HTTPConnection("127.0.0.1", self.http_port, timeout=4)
+            try:
+                connection.request(method, uri, body, headers)
+                response = connection.getresponse()
+                result = response.status, response.read()
+                directives = {item.strip().split("=", 1)[0].lower()
+                              for item in response.getheader("Cache-Control", "").split(",")}
+            finally:
+                connection.close()
+            origin_requests.append((method, uri))
+            if method not in ("GET", "HEAD", "OPTIONS", "TRACE") and 200 <= result[0] < 400:
+                cached.pop(uri, None)
+            if method == "GET" and result[0] in (200, 404) and "no-store" not in directives:
+                cached[uri] = result
+            return result
+
+        scenarios = (
+            ("previously-missing", (
+                ("GET", None, (404, b"NOT_FOUND\n")),
+                ("POST", "created", (200, b"OK\n")),
+                ("GET", None, (200, b"VALUE created\n")),
+                ("DELETE", None, (200, b"OK\n")),
+                ("GET", None, (404, b"NOT_FOUND\n")),
+                ("POST", "recreated", (200, b"OK\n")),
+                ("GET", None, (200, b"VALUE recreated\n")),
+            )),
+            ("previously-present", (
+                ("POST", "before", (200, b"OK\n")),
+                ("GET", None, (200, b"VALUE before\n")),
+                ("POST", "after", (200, b"OK\n")),
+                ("GET", None, (200, b"VALUE after\n")),
+                ("DELETE", None, (200, b"OK\n")),
+                ("GET", None, (404, b"NOT_FOUND\n")),
+                ("POST", "returned", (200, b"OK\n")),
+                ("GET", None, (200, b"VALUE returned\n")),
+            )),
+        )
+        for key, operations in scenarios:
+            for index, (method, value, expected) in enumerate(operations):
+                with self.subTest(key=key, step=index, method=method):
+                    self.assertEqual(through_cache(method, key, value), expected)
+        self.assertEqual(cache_hits, [], "a mutable value or miss was served from cache")
+        self.assertEqual(cached, {}, "mutable responses were retained by the cache")
+        for key, operations in scenarios:
+            uri = "/kv?" + urlencode({"key": key})
+            self.assertEqual(origin_requests.count(("GET", uri)),
+                             sum(method == "GET" for method, _, _ in operations),
+                             "repeated reads did not reach the origin through the same GET URI")
+
     def test_null_json_fields_do_not_overwrite_persisted_values(self):
         original = "keep\x00this\nvalue "
         self.assertEqual(self.request("POST", "protected", original), (200, b"OK\n"))

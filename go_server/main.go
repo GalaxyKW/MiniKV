@@ -62,6 +62,9 @@ func envString(name, fallback string) string {
 
 func newKVHandler(client commandClient) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Both values and misses change after writes. POST /kv need not
+		// invalidate a cached GET /kv?key=..., so prohibit response reuse.
+		w.Header().Set("Cache-Control", "no-store")
 		var request rpcRequest
 		switch r.Method {
 		case http.MethodPost:
