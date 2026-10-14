@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <limits>
-#include <sstream>
+#include <locale>
 #include <stdexcept>
 #include <string_view>
 #include <sys/file.h>
@@ -179,31 +179,125 @@ bool legacy_has_data(int directory, const char* name) {
     return metadata.st_size != 0;
 }
 
-template <class Consumer>
-void read_legacy_lines(int directory, const char* name, const Consumer& consume) {
-    if (!entry_exists(directory, name)) return;
-    File file(open_regular_at(directory, name, O_RDONLY));
-    std::array<char, 8192> buffer;
-    std::string line;
-    while (true) {
-        const ssize_t count = ::read(file.fd, buffer.data(), buffer.size());
-        if (count < 0 && errno == EINTR) continue;
-        if (count < 0) io_error(std::string("read legacy file ") + name);
-        if (count == 0) break;
-        std::string_view remaining(buffer.data(), static_cast<size_t>(count));
-        while (!remaining.empty()) {
-            const auto newline = remaining.find('\n');
-            if (newline == std::string_view::npos) {
-                line.append(remaining);
-                break;
-            }
-            line.append(remaining.substr(0, newline));
-            consume(line);
-            line.clear();
-            remaining.remove_prefix(newline + 1);
+// A malformed line must not grow a temporary string until EOF. Read bounded
+// fields instead. WAL whitespace before tokens is skipped without retaining it;
+// an arbitrary line-size cap would reject formerly valid padded records.
+class LegacyReader {
+public:
+    LegacyReader(int directory, const char* name)
+        : file_(open_regular_at(directory, name, O_RDONLY)), name_(name),
+          whitespace_(std::use_facet<std::ctype<char>>(locale_)) {}
+
+    int peek() {
+        if (position_ == available_) {
+            ssize_t count;
+            do { count = ::read(file_.fd, buffer_.data(), buffer_.size()); }
+            while (count < 0 && errno == EINTR);
+            if (count < 0) io_error(std::string("read legacy file ") + name_);
+            if (count == 0) return -1;
+            position_ = 0;
+            available_ = static_cast<size_t>(count);
         }
+        return static_cast<unsigned char>(buffer_[position_]);
     }
-    if (!line.empty()) throw std::runtime_error(std::string("incomplete legacy record in ") + name);
+
+    void advance() { ++position_; }
+
+    std::string token(size_t limit, const char* field) {
+        int next;
+        // LF ends the record, even though the locale also classifies it as
+        // whitespace. Do not merge blank or incomplete lines with later ones.
+        while ((next = peek()) >= 0 && next != '\n' && is_space(next)) advance();
+        if (next < 0) incomplete();
+        if (next == '\n') throw std::runtime_error(std::string("invalid legacy record in ") + name_);
+        std::string result;
+        while ((next = peek()) >= 0 && next != '\n' && !is_space(next)) {
+            if (result.size() == limit) oversized(field);
+            result.push_back(static_cast<char>(next));
+            advance();
+        }
+        return result;
+    }
+
+    std::string until(char separator, size_t limit, const char* field) {
+        bool line_ended;
+        return delimited(separator, limit, field, false, line_ended);
+    }
+
+    std::string wal_value(size_t limit) {
+        // std::getline on the old istringstream used the locale-widened LF.
+        // Preserve custom facets too, including a delimiter that is itself a
+        // space; getline stopped there before the optional space was removed.
+        const auto separator = whitespace_.widen('\n');
+        if (separator != ' ' && peek() == ' ') advance();
+        bool line_ended;
+        auto result = delimited(separator, limit, "value", true, line_ended);
+        if (!line_ended) {
+            // The old parser ignored bytes after getline's first delimiter,
+            // but the physical record still had to be terminated by LF.
+            while (peek() >= 0) {
+                const std::string_view remaining(buffer_.data() + position_, available_ - position_);
+                const auto newline = remaining.find('\n');
+                if (newline != std::string_view::npos) {
+                    position_ += newline + 1;
+                    return result;
+                }
+                position_ = available_;
+            }
+            incomplete();
+        }
+        return result;
+    }
+
+private:
+    std::string delimited(char separator, size_t limit, const char* field,
+                          bool allow_line_end, bool& line_ended) {
+        std::string result;
+        while (peek() >= 0) {
+            const std::string_view remaining(buffer_.data() + position_, available_ - position_);
+            const auto end = remaining.find(separator);
+            auto part = remaining.substr(0, end);
+            const auto newline = separator == '\n' ? std::string_view::npos : part.find('\n');
+            if (newline != std::string_view::npos) part = part.substr(0, newline);
+            if (part.size() > limit - result.size()) oversized(field);
+            if (newline != std::string_view::npos && !allow_line_end) {
+                throw std::runtime_error(std::string("invalid legacy record in ") + name_);
+            }
+            result.append(part);
+            position_ += part.size();
+            if (end != std::string_view::npos || newline != std::string_view::npos) {
+                line_ended = newline != std::string_view::npos || separator == '\n';
+                advance();
+                return result;
+            }
+        }
+        incomplete();
+    }
+
+    bool is_space(int value) const {
+        return whitespace_.is(std::ctype_base::space, static_cast<char>(value));
+    }
+    [[noreturn]] void oversized(const char* field) const {
+        throw std::runtime_error(std::string("legacy ") + field + " exceeds limit in " + name_);
+    }
+    [[noreturn]] void incomplete() const {
+        throw std::runtime_error(std::string("incomplete legacy record in ") + name_);
+    }
+
+    File file_;
+    const char* name_;
+    std::locale locale_;
+    const std::ctype<char>& whitespace_;
+    std::array<char, 8192> buffer_;
+    size_t position_ = 0;
+    size_t available_ = 0;
+};
+
+template <class Consumer>
+void read_legacy_records(int directory, const char* name, const Consumer& consume) {
+    if (!entry_exists(directory, name)) return;
+    LegacyReader input(directory, name);
+    while (input.peek() >= 0) consume(input);
 }
 
 void write_all(int fd, std::string_view bytes, uint64_t* calls = nullptr, uint64_t* written_bytes = nullptr) {
@@ -449,26 +543,25 @@ bool Engine::load_wal() {
 }
 
 void Engine::import_legacy() {
-    read_legacy_lines(directory_fd_, "data.db", [this](const std::string& line) {
-        const auto separator = line.find(':');
-        if (separator == std::string::npos) throw std::runtime_error("invalid legacy snapshot record");
-        Request entry{Operation::Put, line.substr(0, separator), line.substr(separator + 1)};
+    read_legacy_records(directory_fd_, "data.db", [this](LegacyReader& input) {
+        auto key = input.until(':', kMaxKeySize, "key");
+        auto value = input.until('\n', kMaxValueSize, "value");
+        Request entry{Operation::Put, std::move(key), std::move(value)};
         if (!codec::valid_request(entry)) throw std::runtime_error("invalid legacy key/value size");
         kv_[entry.key] = entry.value;
     });
-    read_legacy_lines(directory_fd_, "wal.log", [this](const std::string& line) {
-        std::istringstream input(line);
-        std::string op, key, value;
-        if (!(input >> op >> key)) throw std::runtime_error("invalid legacy WAL record");
-        std::getline(input, value);
-        if (!value.empty() && value.front() == ' ') value.erase(0, 1);
+    read_legacy_records(directory_fd_, "wal.log", [this](LegacyReader& input) {
+        const auto op = input.token(3, "operation");
+        if (op != "PUT" && op != "DEL") throw std::runtime_error("invalid legacy WAL operation or data");
+        auto key = input.token(kMaxKeySize, "key");
         const Operation operation = op == "PUT" ? Operation::Put : Operation::Delete;
-        Request entry{operation, key, value};
-        if ((op != "PUT" && op != "DEL") || !codec::valid_request(entry)) {
+        auto value = input.wal_value(operation == Operation::Put ? kMaxValueSize : 0);
+        Request entry{operation, std::move(key), std::move(value)};
+        if (!codec::valid_request(entry)) {
             throw std::runtime_error("invalid legacy WAL operation or data");
         }
-        if (operation == Operation::Put) kv_[key] = value;
-        else kv_.erase(key);
+        if (operation == Operation::Put) kv_[entry.key] = entry.value;
+        else kv_.erase(entry.key);
         ++applied_sequence_;
     });
 }

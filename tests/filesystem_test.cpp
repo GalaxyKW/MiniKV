@@ -1,12 +1,17 @@
 #include "engine.h"
 #include "codec.h"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <locale>
 #include <stdexcept>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -17,6 +22,33 @@
 using namespace minikv;
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
+
+namespace {
+
+std::atomic<bool> legacy_read_probe_enabled{false};
+std::atomic<dev_t> legacy_read_probe_device{0};
+std::atomic<ino_t> legacy_read_probe_inode{0};
+std::atomic<size_t> legacy_read_probe_bytes{0};
+
+} // namespace
+
+// Linked only into this test binary. Count actual reads of one legacy source
+// inode so a size-limit test can distinguish early rejection from reading and
+// allocating the entire file first, without imposing an ASan-incompatible VM cap.
+extern "C" ssize_t __real_read(int fd, void* buffer, size_t count);
+extern "C" ssize_t __wrap_read(int fd, void* buffer, size_t count) {
+    const auto result = __real_read(fd, buffer, count);
+    if (result > 0 && legacy_read_probe_enabled.load()) {
+        const int saved_errno = errno;
+        struct stat identity{};
+        if (::fstat(fd, &identity) == 0 && identity.st_dev == legacy_read_probe_device.load() &&
+            identity.st_ino == legacy_read_probe_inode.load()) {
+            legacy_read_probe_bytes.fetch_add(static_cast<size_t>(result));
+        }
+        errno = saved_errno;
+    }
+    return result;
+}
 
 namespace {
 
@@ -206,6 +238,233 @@ void legacy_lines_preserve_bytes_and_require_terminators() {
     }
 }
 
+void check_legacy_import(const std::string& snapshot, const std::string& wal,
+                         const std::vector<std::pair<std::string, std::string>>& values,
+                         const std::vector<std::string>& missing = {}) {
+    TempDir temporary;
+    write_file(temporary.path / "data.db", snapshot);
+    write_file(temporary.path / "wal.log", wal);
+    auto config = config_for(temporary.path);
+    config.import_legacy = true;
+    for (const bool importing : {true, false}) {
+        config.import_legacy = importing;
+        Engine engine(config);
+        for (const auto& entry : values) value_is(engine, entry.first, entry.second);
+        for (const auto& key : missing) {
+            require(engine.execute({Operation::Get, key, {}}).status == Status::NotFound,
+                    "legacy deletion did not survive import/restart: " + key);
+        }
+        engine.close();
+        require(read_file(temporary.path / "data.db") == snapshot &&
+                    read_file(temporary.path / "wal.log") == wal,
+                "legacy import/restart changed source files");
+    }
+}
+
+class LegacyReadProbe {
+    bool active_;
+public:
+    LegacyReadProbe(const fs::path& source, bool active) : active_(active) {
+        if (!active_) return;
+        require(!legacy_read_probe_enabled.load(), "nested legacy read probe");
+        struct stat identity{};
+        require(::stat(source.c_str(), &identity) == 0, "cannot identify legacy read probe source");
+        legacy_read_probe_device.store(identity.st_dev);
+        legacy_read_probe_inode.store(identity.st_ino);
+        legacy_read_probe_bytes.store(0);
+        legacy_read_probe_enabled.store(true);
+    }
+    ~LegacyReadProbe() { if (active_) legacy_read_probe_enabled.store(false); }
+    size_t finish() {
+        if (!active_) return 0;
+        legacy_read_probe_enabled.store(false);
+        active_ = false;
+        return legacy_read_probe_bytes.load();
+    }
+};
+
+void check_legacy_rejection(const std::string& name, const std::string& record,
+                            const std::string& oversized_field = {}, size_t max_read_bytes = 0) {
+    TempDir temporary;
+    const auto snapshot = std::string("before:snapshot\n") + (name == "data.db" ? record : "");
+    const auto wal = std::string("PUT before wal\n") + (name == "wal.log" ? record : "");
+    write_file(temporary.path / "data.db", snapshot);
+    write_file(temporary.path / "wal.log", wal);
+    auto config = config_for(temporary.path);
+    config.import_legacy = true;
+    std::string failure;
+    // Import errors occur before background workers start. Stop observing
+    // before the source-integrity reads below, and restore the probe on throws.
+    LegacyReadProbe probe(temporary.path / name, max_read_bytes != 0);
+    try { Engine imported(config); } catch (const std::exception& error) { failure = error.what(); }
+    const auto read_bytes = probe.finish();
+    require(!failure.empty(), "invalid legacy record was accepted: " + name);
+    if (max_read_bytes != 0) {
+        require(read_bytes > 0, "legacy read probe did not observe the source");
+        require(read_bytes <= max_read_bytes, "legacy size limit consumed too much input: " + std::to_string(read_bytes));
+    }
+    if (!oversized_field.empty()) {
+        // In particular, an oversized unterminated field must fail on its size;
+        // reaching EOF and reporting only a missing LF permits unbounded reads.
+        require(failure.find("legacy " + oversized_field + " exceeds limit") != std::string::npos,
+                "oversized legacy field did not report its limit: " + failure);
+    }
+    require(read_file(temporary.path / "data.db") == snapshot &&
+                read_file(temporary.path / "wal.log") == wal,
+            "failed legacy import changed source files");
+    for (const auto* installed : {"snapshot.v1", "wal.v1", "snapshot.v1.tmp", "wal.v1.tmp"}) {
+        require(!fs::exists(temporary.path / installed), "failed legacy import created binary storage");
+    }
+}
+
+void legacy_fields_have_exact_limits() {
+    std::string snapshot_key(kMaxKeySize, 's');
+    snapshot_key[snapshot_key.size() / 2] = '\0';
+    snapshot_key.back() = '\r';
+    std::string wal_key(kMaxKeySize, 'w');
+    wal_key[wal_key.size() / 2] = '\0';
+    std::string value(kMaxValueSize, 'v');
+    value[8191] = '\0';
+    value.back() = '\r';
+    check_legacy_import(snapshot_key + ":" + value + "\ns:\n",
+                        "PUT " + wal_key + " " + value + "\nPUT w\n",
+                        {{snapshot_key, value}, {wal_key, value}, {"s", ""}, {"w", ""}});
+
+    for (const std::string terminator : {"", "\n"}) {
+        check_legacy_rejection("data.db", std::string(kMaxKeySize + 1, 'k') + ":v" + terminator, "key");
+        check_legacy_rejection("data.db", std::string(kMaxKeySize + 1, 'k') + terminator, "key");
+        check_legacy_rejection("data.db", "key:" + std::string(kMaxValueSize + 1, 'v') + terminator, "value");
+        check_legacy_rejection("wal.log", "PUTX key value" + terminator, "operation");
+        check_legacy_rejection("wal.log", "PUTX" + terminator, "operation");
+        check_legacy_rejection("wal.log", "PUT " + std::string(kMaxKeySize + 1, 'k') + " v" + terminator, "key");
+        check_legacy_rejection("wal.log", "PUT " + std::string(kMaxKeySize + 1, 'k') + terminator, "key");
+        check_legacy_rejection("wal.log", "PUT key " + std::string(kMaxValueSize + 1, 'v') + terminator, "value");
+    }
+}
+
+void legacy_token_padding_is_not_a_record_limit() {
+    // These discarded runs each exceed the largest valid ordinary record. A
+    // whole-line length cap would reject an import accepted by the old format.
+    const std::string padding(2 * kMaxValueSize, ' ');
+    check_legacy_import("existing:before\n",
+                        padding + "\t\v\f\rPUT" + padding + "\t\v\f\rkey value\nDEL existing \n",
+                        {{"key", "value"}}, {"existing"});
+    // The reader must track consumed bytes even when no token bytes are kept.
+    check_legacy_rejection("wal.log", padding + "\t\v\f\r");
+    check_legacy_rejection("wal.log", padding + "\t\v\f\r\n");
+}
+
+void legacy_oversized_values_stop_reading_early() {
+    const std::string oversized(4 * kMaxValueSize, 'v');
+    for (const std::string name : {"data.db", "wal.log"}) {
+        for (const std::string terminator : {"", "\n"}) {
+            const std::string prefix = name == "data.db" ? "key:" : "PUT key ";
+            check_legacy_rejection(name, prefix + oversized + terminator, "value",
+                                   kMaxKeySize + kMaxValueSize + 8192);
+        }
+    }
+}
+
+void legacy_delimiters_preserve_the_original_format() {
+    const std::string snapshot_key = std::string(" \ts") + '\0' + '\r';
+    const std::string snapshot_value = std::string(" :\t") + '\0' + '\r';
+    const std::string wal_key = std::string("wal:") + '\0' + "key";
+    const std::string wal_value = std::string("\t :") + '\0' + '\r';
+    check_legacy_import(snapshot_key + ":" + snapshot_value + "\ndelete:before\ndelete-space:before\n",
+                        " \t\v\f\rPUT\t\v\f\r" + wal_key + wal_value +
+                            "\nPUT no-value\nPUT one-space \nPUT two-spaces  \nPUT cr\r\n"
+                            "DEL delete\nDEL delete-space \n",
+                        {{snapshot_key, snapshot_value}, {wal_key, wal_value}, {"no-value", ""},
+                         {"one-space", ""}, {"two-spaces", " "}, {"cr", "\r"}},
+                        {"delete", "delete-space"});
+    for (const std::string record : {":value\n", "no-colon\n", "\n", "key:value", " \t\r"}) {
+        check_legacy_rejection("data.db", record);
+    }
+    for (const std::string record : {"GET key\n", "PUT\n", "PUT \t\r\n", "DEL key  \n",
+                                     "DEL key\t\n", "DEL key\r\n", "PUT key value", "\n"}) {
+        check_legacy_rejection("wal.log", record);
+    }
+    check_legacy_rejection("wal.log", std::string("DEL key ") + '\0' + '\n');
+}
+
+class LegacyWhitespace : public std::ctype<char> {
+    static const std::array<mask, table_size>& table() {
+        static const auto masks = [] {
+            std::array<mask, table_size> result{};
+            std::copy_n(classic_table(), table_size, result.begin());
+            result[static_cast<unsigned char>('~')] |= space;
+            return result;
+        }();
+        return masks;
+    }
+public:
+    LegacyWhitespace() : std::ctype<char>(table().data()) {}
+};
+
+struct RestoreLocale {
+    std::locale previous = std::locale();
+    ~RestoreLocale() { std::locale::global(previous); }
+};
+
+void legacy_wal_uses_cpp_locale_for_token_whitespace() {
+    RestoreLocale restore;
+    std::locale::global(std::locale(restore.previous, new LegacyWhitespace));
+    check_legacy_import("~snapshot:~value\n", "~~PUT~~~key~value\n",
+                        {{"~snapshot", "~value"}, {"key", "~value"}});
+}
+
+class LegacyWidenedNewline : public std::ctype<char> {
+    char delimiter_;
+protected:
+    char do_widen(char value) const override { return value == '\n' ? delimiter_ : value; }
+    const char* do_widen(const char* first, const char* last, char* output) const override {
+        for (auto current = first; current != last; ++current) *output++ = do_widen(*current);
+        return last;
+    }
+public:
+    explicit LegacyWidenedNewline(char delimiter) : delimiter_(delimiter) {}
+};
+
+void legacy_wal_preserves_widened_getline_delimiters() {
+    // The original getline used input.widen('\n') after the physical LF was
+    // removed. Bytes following that delimiter were ignored within that record.
+    // A large ignored suffix is legal and must not become part of the value or
+    // impose a whole-line length limit on the streaming reader.
+    const std::string ignored(2 * kMaxValueSize, 'x');
+    const std::string maximum(kMaxValueSize, 'v');
+    for (const char delimiter : {'|', '\r', '\0'}) {
+        RestoreLocale restore;
+        std::locale::global(std::locale(restore.previous, new LegacyWidenedNewline(delimiter)));
+        const std::string separator(1, delimiter);
+        check_legacy_import("deleted:before\nraw:" + separator + "snapshot\n",
+                            "PUT kept value" + separator + ignored + "\n"
+                            "PUT maximum " + maximum + separator + "ignored\n"
+                            "PUT empty " + separator + "ignored\n"
+                            "PUT one-space  " + separator + "ignored\n"
+                            "PUT no-delimiter complete\nPUT no-value\n"
+                            "DEL deleted " + separator + "ignored\nPUT after next\n",
+                            {{"raw", separator + "snapshot"}, {"kept", "value"}, {"maximum", maximum},
+                             {"empty", ""}, {"one-space", " "}, {"no-delimiter", "complete"},
+                             {"no-value", ""}, {"after", "next"}}, {"deleted"});
+        check_legacy_rejection("wal.log", "PUT key value" + separator + ignored);
+        check_legacy_rejection("wal.log", "PUT key " + maximum + "v" + separator + "ignored\n", "value");
+        check_legacy_rejection("wal.log", "DEL key  " + separator + "ignored\n", "value");
+    }
+    {
+        RestoreLocale restore;
+        std::locale::global(std::locale(restore.previous, new LegacyWidenedNewline(' ')));
+        // When space is the delimiter, it ends getline before the old code
+        // strips a leading space. Removing it first would retain "discarded".
+        check_legacy_import("deleted:before\n",
+                            "PUT empty " + ignored + "\nPUT tab\tkept discarded\n"
+                            "PUT no-value\nDEL deleted discarded\nPUT after ignored\n",
+                            {{"empty", ""}, {"tab", "\tkept"}, {"no-value", ""}, {"after", ""}},
+                            {"deleted"});
+        check_legacy_rejection("wal.log", "PUT key " + ignored);
+        check_legacy_rejection("wal.log", "DEL key\tnot-empty ignored\n", "value");
+    }
+}
+
 void temporary_aliases_never_truncate_targets() {
     for (const std::string name : {"snapshot.v1.tmp", "wal.v1.tmp"}) {
         for (const std::string kind : {"symlink", "hardlink", "regular"}) {
@@ -334,6 +593,12 @@ int main(int argc, char** argv) {
         {"mutable hard links", mutable_files_must_not_share_inodes},
         {"read-only hard links", read_only_hard_links_remain_unchanged},
         {"legacy line boundaries", legacy_lines_preserve_bytes_and_require_terminators},
+        {"legacy field limits", legacy_fields_have_exact_limits},
+        {"legacy token padding", legacy_token_padding_is_not_a_record_limit},
+        {"legacy bounded reads", legacy_oversized_values_stop_reading_early},
+        {"legacy delimiters", legacy_delimiters_preserve_the_original_format},
+        {"legacy token locale", legacy_wal_uses_cpp_locale_for_token_whitespace},
+        {"legacy getline locale", legacy_wal_preserves_widened_getline_delimiters},
         {"temporary aliases", temporary_aliases_never_truncate_targets},
         {"temporary directories", temporary_directories_are_not_removed},
         {"directory identity", directory_changes_do_not_redirect_io},

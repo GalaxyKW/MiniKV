@@ -39,6 +39,9 @@ if(BUILD_TESTING)
     add_test(NAME wal_format_upgrade COMMAND wal_format_test)
     add_executable(filesystem_test ../tests/filesystem_test.cpp)
     target_link_libraries(filesystem_test PRIVATE minikv_storage)
+    # Count only reads of a selected legacy fixture to verify early rejection
+    # without memory limits (which conflict with sanitizer shadow mappings).
+    target_link_options(filesystem_test PRIVATE -Wl,--wrap=read)
     add_test(NAME storage_filesystem COMMAND filesystem_test)
     add_executable(data_limit_test ../tests/data_limit_test.cpp)
     target_link_libraries(data_limit_test PRIVATE minikv_storage)
