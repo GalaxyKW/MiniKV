@@ -11,10 +11,10 @@ make sanitize-test
 
 | 命令 | 实际执行内容 |
 | --- | --- |
-| `make test` | 检查文档与并发历史校验器，构建 C++ 引擎、Go 网关与压测工具；运行七个 C++ 测试程序、`go test -race -timeout 60s ./...`、离线检查、Python 端到端测试与实验脚本测试 |
+| `make test` | 检查文档与并发历史校验器，构建 C++ 引擎、Go 网关与压测工具；运行八个 C++ 测试程序、`go test -race -timeout 60s ./...`、离线检查、Python 端到端测试与实验脚本测试 |
 | `make docs-test` | 检查 README 与 `docs/` 中的本地内联链接、标题锚点和 shell 示例语法，并验证检查器本身；只需 Python 3.8+ 与 Bash，不构建或启动服务 |
 | `make history-test` | 验证并发历史校验器能接受合法重叠、拒绝陈旧读取与实时顺序冲突，搜索超限明确失败；只需 Python 3.8+，不启动服务 |
-| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及七个测试程序；运行 C++ 测试，以及针对该引擎的离线检查与端到端测试 |
+| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及八个测试程序；运行 C++ 测试，以及针对该引擎的离线检查与端到端测试 |
 | `make fuzz-test` | 用 Clang/libFuzzer、ASan/UBSan 检查 C++ 二进制 codec，再用 Go fuzz 检查 RPC 响应；每种语言默认随机运行 10 秒，另需种子检查与编译时间 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
@@ -88,6 +88,7 @@ make docs-test
 | 快照输出与恢复 | 跨多个输出缓冲的小记录、大记录、空值与 NUL，逐记录 CRC 对账并在 WAL 只有文件头时恢复；真实快照短写/EFBIG 后保留旧文件、继续可靠写入并重启 | [snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 快照计量 | 捕获持锁计时不包含门控 WAL 同步；快照与后缀写入量和实际文件对账；部分写、同步或安装后失败保留准确计数 | [stats_test.cpp](../tests/stats_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
 | 故障边界 | WAL/快照 I/O 故障注入、空诊断仍锁存失败并结束可靠等待、文件大小限制触发真实短写/EFBIG、快照安装与 WAL 后缀替换边界的子进程退出、恢复后再次写入和重启 | [engine_test.cpp](../tests/engine_test.cpp)、[async_test.cpp](../tests/async_test.cpp)、[snapshot_test.cpp](../tests/snapshot_test.cpp) |
+| 诊断分配失败 | 快照分离 WAL 批次后发生写入错误，再使保存诊断的一次内存分配失败；验证两种 WAL 模式仍锁存故障、可靠 PUT/GET 各结束一次、后续操作拒绝、关闭不追加日志及重启后可重新写入。分配故障只作用于独立测试程序中的当前线程 | [allocation_failure_test.cpp](../tests/allocation_failure_test.cpp) |
 | HTTP 与 RPC | 参数与状态码映射、非法查询串与显式 null 字段不执行后端操作、合法慢上传的响应预算、值字节保留、连接复用与总连接上限、取消与超时、异常响应处理、写请求不重试 | [main_test.go](../go_server/main_test.go)、[client_test.go](../go_server/client_test.go) |
 | 网关 HTTP 接纳 | 慢上传在解码前占名额、RPC 池前等待者受限；定长/chunked/100-continue 的未发送正文仍能收到拒绝；响应写入、取消、panic 与名额归还；数据和状态路由独立 | [admission_test.go](../go_server/admission_test.go)、[端到端测试](../tests/integration_test.py) |
 | 运行状态 | WAL 队列与写盘批次区分、容量与可靠确认等待、任务排队计时、失败唤醒与重启归零；RPC 等待与重试、基础字段缺失或 null 不补零、旧引擎可选字段的透传语义 | [engine_test.cpp](../tests/engine_test.cpp)、[stats_test.cpp](../tests/stats_test.cpp)、[stats_test.go](../go_server/stats_test.go) |
@@ -169,11 +170,11 @@ ThreadSanitizer 使用独立构建目录，与 ASan/UBSan 检查分开运行：
 cmake -S cpp_engine -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
   '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
   -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
-cmake --build build-tsan --target engine_test snapshot_test stats_test async_test wal_format_test filesystem_test data_limit_test -j2
+cmake --build build-tsan --target engine_test snapshot_test stats_test async_test wal_format_test filesystem_test data_limit_test allocation_failure_test -j2
 (cd build-tsan && TSAN_OPTIONS=halt_on_error=1 ctest --output-on-failure)
 ```
 
-该命令覆盖存储、快照、运行状态、异步确认、WAL 格式、文件系统边界和数据容量七个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
+该命令覆盖存储、快照、运行状态、异步确认、WAL 格式、文件系统边界、数据容量和诊断分配失败八个测试程序，不运行端到端网络测试。Go 数据竞争检查已由 `make test` 中的 `go test -race` 执行。
 
 如果 TSan 在测试启动前报告 `unexpected memory mapping`，在支持 `setarch` 的 x86_64 Linux 环境中，可以仅对本次测试进程及其子进程关闭地址随机化后重试：
 

@@ -657,13 +657,21 @@ void Engine::import_legacy() {
     });
 }
 
-void Engine::fail_locked(const std::string& message) {
-    if (failure_.empty()) {
-        // A nonempty diagnostic is also the terminal-failure latch. An I/O
-        // hook may throw an exception with no message; it must still wake and
-        // reject waiters instead of allowing commits past a failed WAL batch.
-        failure_ = message.empty() ? "storage operation failed without a diagnostic" : message;
-        std::cerr << "storage I/O failure; requests rejected until restart: " << failure_ << '\n';
+void Engine::fail_locked(std::string_view message) noexcept {
+    if (!failed_) {
+        // Record the state before any diagnostic allocation. A detached WAL
+        // batch can no longer be retried if reporting its failure also throws.
+        failed_ = true;
+        try {
+            if (message.empty()) message = "storage operation failed without a diagnostic";
+            failure_.assign(message.data(), message.size());
+        } catch (...) {
+            failure_.clear();
+        }
+        try {
+            std::cerr << "storage I/O failure; requests rejected until restart: "
+                      << (failure_.empty() ? "diagnostic unavailable" : std::string_view(failure_)) << '\n';
+        } catch (...) { /* Logging must not prevent failure publication. */ }
     }
     committed_.notify_all();
 }
@@ -687,7 +695,7 @@ bool Engine::data_size_after(const Request& request, uint64_t& bytes) const {
 }
 
 Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_lock<std::mutex>& lock) {
-    if (!failure_.empty()) return {{Status::IOError, failure_}};
+    if (failed_) return {{Status::IOError, failure_}};
     if (stopping_) return {{Status::Busy, "engine is stopping"}};
     if (request.operation == Operation::Get) {
         const auto it = kv_.find(request.key);
@@ -702,10 +710,10 @@ Engine::AppliedRequest Engine::apply_locked(const Request& request, std::unique_
     const size_t size = codec::kWalRecordHeader + request.key.size() + request.value.size() + 4;
     const bool capacity_wait = pending_bytes_ + size > config_.wal_queue_bytes;
     wait_with_stats(committed_, lock,
-                    [&] { return stopping_ || !failure_.empty() || pending_bytes_ + size <= config_.wal_queue_bytes; },
+                    [&] { return stopping_ || failed_ || pending_bytes_ + size <= config_.wal_queue_bytes; },
                     stats_.wal_capacity_waiters, stats_.wal_capacity_waits_total,
                     stats_.wal_capacity_wait_duration_ns_total);
-    if (!failure_.empty()) return {{Status::IOError, failure_}};
+    if (failed_) return {{Status::IOError, failure_}};
     if (stopping_) return {{Status::Busy, "engine is stopping"}};
     if (capacity_wait && !data_size_after(request, next_data_bytes)) {
         ++stats_.data_rejections_total;
@@ -736,10 +744,10 @@ Response Engine::execute(const Request& request) {
     auto applied = apply_locked(request, lock);
     if (applied.confirm) {
         wait_with_stats(committed_, lock,
-                        [&] { return stopping_ || !failure_.empty() || durable_sequence_ >= applied.target; },
+                        [&] { return stopping_ || failed_ || durable_sequence_ >= applied.target; },
                         stats_.wal_durable_waiters, stats_.wal_durable_waits_total,
                         stats_.wal_durable_wait_duration_ns_total);
-        if (!failure_.empty()) return {Status::IOError, failure_};
+        if (failed_) return {Status::IOError, failure_};
         if (durable_sequence_ < applied.target) {
             return {Status::IOError, request.operation == Operation::Get
                 ? "shutdown before observed state was durable" : "shutdown before durable acknowledgement"};
@@ -754,7 +762,7 @@ std::optional<Response> Engine::execute_async(const Request& request, AsyncCompl
     AsyncReservation<std::list<PendingReply>> reservation{this, mutex_, committed_, stats_.async_requests_inflight, {}};
     auto& prepared = reservation.resources;
     std::unique_lock<std::mutex> lock(mutex_);
-    if (!failure_.empty()) return Response{Status::IOError, failure_};
+    if (failed_) return Response{Status::IOError, failure_};
     if (stopping_) return Response{Status::Busy, "engine is stopping"};
     uint64_t next_data_bytes;
     if (config_.max_data_bytes && request.operation == Operation::Put && !data_size_after(request, next_data_bytes)) {
@@ -840,7 +848,7 @@ void Engine::flush_pending() {
         size_t batch_bytes;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!failure_.empty()) throw std::runtime_error(failure_);
+            if (failed_) throw std::runtime_error(failure_);
             if (pending_.empty()) return;
             batch.swap(pending_);
             batch_bytes = pending_bytes_;
@@ -967,7 +975,7 @@ void Engine::snapshot() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (stopping_) throw std::runtime_error("engine is stopping");
-        if (!failure_.empty()) throw std::runtime_error(failure_);
+        if (failed_) throw std::runtime_error(failure_);
         stats_.snapshot_in_progress = true;
     }
     try {
@@ -986,7 +994,7 @@ void Engine::snapshot() {
                                              stats_.snapshot_capture_state_lock_duration_ns_total,
                                              stats_.snapshot_capture_state_lock_duration_ns_max};
                 if (stopping_) throw std::runtime_error("engine is stopping");
-                if (!failure_.empty()) throw std::runtime_error(failure_);
+                if (failed_) throw std::runtime_error(failure_);
                 // Copy before detaching: an allocation failure leaves the queue intact.
                 image = kv_;
                 sequence = applied_sequence_;
@@ -1015,7 +1023,7 @@ void Engine::snapshot() {
             io_lock.lock();
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                if (!failure_.empty()) throw std::runtime_error(failure_);
+                if (failed_) throw std::runtime_error(failure_);
             }
             compact_wal(boundary, written_bytes);
             {
@@ -1056,7 +1064,7 @@ void Engine::background_work() {
             lock.lock();
             flush_at = Clock::now() + config_.wal_flush_interval;
         }
-        if (!failure_.empty()) wake_.wait(lock, [this] { return stopping_; });
+        if (failed_) wake_.wait(lock, [this] { return stopping_; });
     }
 }
 
@@ -1064,7 +1072,7 @@ void Engine::background_snapshots() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!stopping_) {
         if (snapshot_wake_.wait_for(lock, config_.snapshot_interval, [this] { return stopping_; })) break;
-        if (!failure_.empty()) continue;
+        if (failed_) continue;
         lock.unlock();
         try { snapshot(); }
         catch (const std::exception& error) { std::cerr << "snapshot failed: " << error.what() << '\n'; }
@@ -1078,7 +1086,7 @@ void Engine::background_replies() {
         committed_.wait(lock, [this] {
             return (stopping_ && stats_.async_requests_inflight == 0) ||
                 (!pending_replies_.empty() &&
-                 (stopping_ || !failure_.empty() || pending_replies_.front().target <= durable_sequence_));
+                 (stopping_ || failed_ || pending_replies_.front().target <= durable_sequence_));
         });
         if (stopping_ && stats_.async_requests_inflight == 0) return;
 
@@ -1090,7 +1098,7 @@ void Engine::background_replies() {
         stats_.wal_durable_wait_duration_ns_total += elapsed_ns(reply.wait_started);
         // Match execute's error precedence at the moment this waiter reacquires
         // state. Later commits/failures cannot change the already chosen reply.
-        if (!failure_.empty()) response_error(reply.response, failure_);
+        if (failed_) response_error(reply.response, failure_);
         else if (durable_sequence_ < reply.target) {
             response_error(reply.response, "shutdown before durable acknowledgement");
         }
@@ -1129,7 +1137,7 @@ EngineStats Engine::stats() const {
     result.wal_queued_records = pending_.size();
     result.wal_queue_capacity_bytes = config_.wal_queue_bytes;
     result.async_requests_capacity = config_.max_async_requests;
-    result.io_failed = !failure_.empty();
+    result.io_failed = failed_;
     result.stopping = stopping_;
     return result;
 }
@@ -1154,7 +1162,7 @@ void Engine::close() {
         std::lock_guard<std::mutex> snapshot_lock(snapshot_mutex_);
         std::lock_guard<std::mutex> io_lock(io_mutex_);
         std::lock_guard<std::mutex> lock(mutex_);
-        if (failure_.empty()) {
+        if (!failed_) {
             try { flush_locked(); }
             catch (const std::exception&) { /* Preserve the failure while still releasing descriptors. */ }
         }
@@ -1165,7 +1173,7 @@ void Engine::close() {
     // The notifier also waits for reserved submitters to return on shutdown.
     if (reply_worker_.joinable()) reply_worker_.join();
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!failure_.empty()) throw std::runtime_error(failure_);
+    if (failed_) throw std::runtime_error(failure_);
 }
 
 } // namespace minikv

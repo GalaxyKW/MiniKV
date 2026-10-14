@@ -9,6 +9,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 
@@ -191,7 +192,7 @@ private:
     void background_snapshots();
     void background_replies();
     void hook(const std::string& point);
-    void fail_locked(const std::string& message);
+    void fail_locked(std::string_view message) noexcept;
     void release_files() noexcept;
 
     EngineConfig config_;
@@ -221,6 +222,8 @@ private:
     int lock_fd_ = -1;
     bool stopping_ = false;
     bool closed_ = false;
+    // Terminal state must survive failure to allocate the optional diagnostic.
+    bool failed_ = false;
     std::string failure_;
     std::thread worker_;
     std::thread snapshot_worker_;
