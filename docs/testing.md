@@ -11,12 +11,13 @@ make sanitize-test
 
 | 命令 | 实际执行内容 |
 | --- | --- |
-| `make test` | 检查文档与并发历史校验器，构建 C++ 引擎、Go 网关与压测工具；运行七个 C++ 测试程序、`go test -race -timeout 60s ./...`、Python 端到端测试与实验脚本测试 |
+| `make test` | 检查文档与并发历史校验器，构建 C++ 引擎、Go 网关与压测工具；运行七个 C++ 测试程序、`go test -race -timeout 60s ./...`、离线检查、Python 端到端测试与实验脚本测试 |
 | `make docs-test` | 检查 README 与 `docs/` 中的本地内联链接、标题锚点和 shell 示例语法，并验证检查器本身；只需 Python 3.8+ 与 Bash，不构建或启动服务 |
 | `make history-test` | 验证并发历史校验器能接受合法重叠、拒绝陈旧读取与实时顺序冲突，搜索超限明确失败；只需 Python 3.8+，不启动服务 |
-| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及七个测试程序；运行 C++ 测试，以及连接该引擎的端到端测试 |
+| `make sanitize-test` | 使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 构建 C++ 引擎及七个测试程序；运行 C++ 测试，以及针对该引擎的离线检查与端到端测试 |
 | `make unit-test` | 构建后运行 C++ 测试与 Go race 检查 |
 | `make integration-test` | 构建后运行 Python 端到端测试 |
+| `make check-test` | 构建引擎后验证 `--check` 的结果、退出码、锁与文件边界，以及检查前后文件内容和布局不变 |
 | `make experiment-test` | 使用 Python 标准库验证元数据采样、隔离实验、报告汇总、快照离线分析与子进程清理；不需要提前构建服务 |
 
 [CI 工作流](../.github/workflows/ci.yml) 在 push 和 pull request 时执行 `make test` 与 `make sanitize-test`。ThreadSanitizer 检查需要按下文手动运行。
@@ -45,6 +46,7 @@ make docs-test
 | --- | --- | --- |
 | 存储与恢复 | 二进制值、并发写入、group commit、目录独占、旧数据导入、并发关闭、WAL 尾部修复、校验和错误与文件缺失 | [engine_test.cpp](../tests/engine_test.cpp) |
 | WAL 格式与升级 | 文件头与两条记录头逐位损坏、每个真实尾部截断位置、旧版含糊尾部保持原样、固定旧版本文件兼容、检查点升级及安装边界异常/退出后恢复 | [wal_format_test.cpp](../tests/wal_format_test.cpp) |
+| 离线备份检查 | 独立编码的快照与新旧 WAL、完整前缀与尾损、CRC 与序列错误、缺文件、锁冲突、链接及特殊文件、无写权限检查与命令配置隔离；验证检查不改原文件 | [check_test.py](../tests/check_test.py) |
 | 文件系统边界 | 重定向目录链接、重命名并复用路径时两个数据库互不串写；文件类型及硬链接检查、临时文件别名与写失败后恢复、只读硬链接保留、旧数据字段边界、超长字段提前拒绝及行尾校验 | [filesystem_test.cpp](../tests/filesystem_test.cpp) |
 | 数据容量 | key/value 字节精确计量、覆盖和删除释放、无副作用拒绝、异步即时响应、并发额度竞争、WAL 等待后重查、恢复最终状态及超限拒绝不改文件 | [data_limit_test.cpp](../tests/data_limit_test.cpp) |
 | WAL 并发 | 暂停 WAL 同步时吞吐模式请求仍可执行；未同步批次仍占用队列额度；可靠模式按批次确认；关闭时排空正在同步和待写的批次 | [engine_test.cpp](../tests/engine_test.cpp) |
@@ -73,6 +75,8 @@ HTTP 接纳测试使用真实 RPC 客户端与阻塞的 `net.Pipe` 后端，确�
 启动检查对每项服务器参数分别验证：配置无效时不创建新数据目录，也不改动既有旧格式文件；导入命令仍忽略服务器专用参数。存储单测直接构造 `EngineConfig`，验证时间间隔超界、负值和极大值在打开数据前拒绝，最大合法间隔仍能正常启动与关闭。HTTP 端到端测试确认 null 字段（包括重复字段中的 null）被拒绝后原值和日志序列不变，重启后原值仍可读，省略 value 和显式空字符串仍可写入。WAL 兼容测试中的固定文件来自 `6407aa7`，覆盖空日志与检查点后继续写入、删除及 NUL 值，不依赖当前编码器重新生成旧格式样本。
 
 旧文本导入测试覆盖 4096 字节 key、1 MiB value 的精确边界和多一个字节的拒绝，保留 NUL、CR、空值以及超长但可跳过的 WAL 空白。测试还使用自定义 C++ locale 核对原格式语义。`filesystem_test` 单独通过链接器的 `--wrap=read` 统计指定测试文件 inode 的实际读取量：对 4 MiB 超长字段，要求在大小上限加读取块余量内停止，且源文件不变、没有安装二进制文件。这个断言能区分提前拒绝和读完整行后才拒绝；不依赖耗时或 RSS 阈值，也不对 ASan 进程施加地址空间上限。生产引擎不链接该探针。
+
+离线检查测试用 Python 独立编码快照和 WAL，不先启动引擎改写待测文件。每次检查前后比较目录项、文件内容、inode、修改和状态变更时间，允许普通读取更新访问时间。只读场景先证明相同身份无法创建或修改文件；以 root 运行时，子进程降权后再执行检查。测试也验证输出设备写满或管道关闭时返回失败，数据文件仍保持原样。
 
 这些检查分别验证具体并发交错、错误处理和恢复边界。进程退出测试不等同于真实断电测试；文件同步的持久性仍依赖操作系统、文件系统和设备履行 `fdatasync/fsync` 约定。已有回归检查也不代表已经测得性能提升。
 

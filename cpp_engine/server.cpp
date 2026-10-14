@@ -711,13 +711,39 @@ private:
 int main(int argc, char** argv) {
     try {
         EngineConfig config;
+        bool check_requested = false;
+        for (int i = 1; i < argc; ++i) {
+            if (std::string(argv[i]) == "--check") check_requested = true;
+        }
+        const bool check_only = argc == 2 && check_requested;
         if (argc == 2 && std::string(argv[1]) == "--import-legacy") config.import_legacy = true;
-        else if (argc != 1) {
-            std::cerr << "usage: engine [--import-legacy]\n";
-            return 2;
+        else if (argc != 1 && !check_only) {
+            std::cerr << "usage: engine [--import-legacy | --check]\n";
+            // For --check, exit 2 is reserved for a successfully inspected,
+            // repairable WAL tail, never an invalid argument combination.
+            return check_requested ? 1 : 2;
         }
         config.data_dir = env_string("MINIKV_DATA_DIR", "./data");
         config.max_data_bytes = env_uint64("MINIKV_MAX_DATA_BYTES", 0);
+        if (check_only) {
+            // Report output errors through the same CLI failure path, including
+            // a consumer that closes its pipe before reading the JSON report.
+            std::signal(SIGPIPE, SIG_IGN);
+            // Check only the on-disk image. Runtime configuration, recovery
+            // writes, worker creation and network setup do not apply here.
+            const auto result = check_storage(config.data_dir, config.max_data_bytes);
+            const bool has_tail = result.wal_trailing_bytes != 0;
+            std::cout << "{\"schema_version\":1,\"status\":\"" << (has_tail ? "recoverable_tail" : "valid")
+                      << "\",\"keys\":" << result.keys << ",\"data_bytes\":" << result.data_bytes
+                      << ",\"data_capacity_bytes\":" << config.max_data_bytes
+                      << ",\"snapshot_sequence\":" << result.snapshot_sequence
+                      << ",\"applied_sequence\":" << result.applied_sequence
+                      << ",\"wal_format\":\"" << (result.legacy_wal ? "v1" : "v2")
+                      << "\",\"wal_valid_bytes\":" << result.wal_valid_bytes
+                      << ",\"wal_trailing_bytes\":" << result.wal_trailing_bytes << "}\n" << std::flush;
+            if (!std::cout) throw std::runtime_error("cannot write storage check report");
+            return has_tail ? 2 : 0;
+        }
         const auto mode = env_string("MINIKV_WAL_MODE", "throughput");
         if (mode != "throughput" && mode != "reliable") throw std::invalid_argument("MINIKV_WAL_MODE must be throughput or reliable");
         config.wal_mode = mode == "reliable" ? WalMode::Reliable : WalMode::Throughput;

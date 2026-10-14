@@ -359,7 +359,140 @@ std::string snapshot_header(uint64_t sequence, uint64_t size) {
     return bytes;
 }
 
+using StorageImage = std::unordered_map<std::string, std::string>;
+
+uint64_t read_snapshot(int fd, StorageImage& image) {
+    const std::string header = read_bytes(fd, 28);
+    if (header.size() != 28 || header.substr(0, 8) != "MKVSNP01" ||
+        codec::u32(header, 24) != codec::crc32(std::string_view(header).substr(0, 24))) {
+        throw std::runtime_error("corrupt snapshot header");
+    }
+    const uint64_t sequence = codec::u64(header, 8);
+    const uint64_t count = codec::u64(header, 16);
+    struct stat metadata{};
+    if (::fstat(fd, &metadata) != 0) io_error("stat snapshot");
+    if (count > static_cast<uint64_t>(metadata.st_size) / (codec::kRecordHeader + 5)) {
+        throw std::runtime_error("invalid snapshot entry count");
+    }
+    for (uint64_t i = 0; i < count; ++i) {
+        auto bytes = read_bytes(fd, codec::kRecordHeader);
+        const size_t size = codec::record_size(bytes);
+        bytes += read_bytes(fd, size - bytes.size());
+        const auto entry = codec::decode_record(bytes);
+        if (entry.operation != Operation::Put || codec::u64(bytes, 5) != sequence ||
+            !image.emplace(entry.key, entry.value).second) {
+            throw std::runtime_error("invalid snapshot entry");
+        }
+    }
+    if (!read_bytes(fd, 1).empty()) throw std::runtime_error("unexpected snapshot trailing bytes");
+    return sequence;
+}
+
+struct WalReplayResult {
+    bool legacy = false;
+    off_t data_start = 0;
+    off_t valid_bytes = 0;
+    size_t trailing_bytes = 0;
+};
+
+WalReplayResult replay_wal(int fd, StorageImage& image, uint64_t& applied_sequence) {
+    if (::lseek(fd, 0, SEEK_SET) < 0) io_error("seek WAL");
+    const auto prefix = read_bytes(fd, 4);
+    WalReplayResult result;
+    result.legacy = prefix.empty() || prefix == "MKL1";
+    if (result.legacy) {
+        if (::lseek(fd, 0, SEEK_SET) < 0) io_error("seek legacy WAL");
+    } else {
+        const auto header = prefix + read_bytes(fd, codec::kWalFileHeader - prefix.size());
+        codec::validate_wal_file_header(header);
+        result.data_start = static_cast<off_t>(codec::kWalFileHeader);
+    }
+    result.valid_bytes = result.data_start;
+    uint64_t previous = 0;
+    while (true) {
+        const auto header_size = result.legacy ? codec::kRecordHeader : codec::kWalRecordHeader;
+        std::string bytes = read_bytes(fd, header_size);
+        if (bytes.empty()) break;
+        if (bytes.size() != header_size) {
+            if (result.legacy) throw std::runtime_error("incomplete legacy WAL; refusing ambiguous tail repair");
+            result.trailing_bytes = bytes.size();
+            break;
+        }
+        const size_t size = result.legacy ? codec::record_size(bytes) : codec::wal_record_size(bytes);
+        bytes += read_bytes(fd, size - bytes.size());
+        if (bytes.size() != size) {
+            // Legacy lengths lack a separate checksum. A corrupt full record
+            // can look exactly like a torn body; leave the original untouched.
+            if (result.legacy) throw std::runtime_error("incomplete legacy WAL; refusing ambiguous tail repair");
+            result.trailing_bytes = bytes.size();
+            break;
+        }
+        const auto entry = result.legacy ? codec::decode_record(bytes) : codec::decode_wal_record(bytes);
+        const uint64_t sequence = codec::u64(bytes, 5);
+        if (sequence == 0 || (previous != 0 && sequence != previous + 1)) {
+            throw std::runtime_error("non-contiguous WAL sequence");
+        }
+        previous = sequence;
+        // A crash after snapshot installation can leave the old WAL intact.
+        if (sequence > applied_sequence) {
+            if (sequence != applied_sequence + 1) throw std::runtime_error("missing WAL sequence");
+            if (entry.operation == Operation::Put) image[entry.key] = entry.value;
+            else image.erase(entry.key);
+            applied_sequence = sequence;
+        }
+        result.valid_bytes += static_cast<off_t>(size);
+    }
+    return result;
+}
+
+uint64_t recovered_data_bytes(const StorageImage& image, uint64_t max_data_bytes) {
+    uint64_t bytes = 0;
+    for (const auto& entry : image) {
+        const uint64_t size = static_cast<uint64_t>(entry.first.size()) + entry.second.size();
+        if (size > std::numeric_limits<uint64_t>::max() - bytes) {
+            throw std::runtime_error("recovered data byte count overflows");
+        }
+        bytes += size;
+        if (max_data_bytes && bytes > max_data_bytes) {
+            throw std::runtime_error("recovered data exceeds configured data byte capacity");
+        }
+    }
+    return bytes;
+}
+
 } // namespace
+
+StorageCheckResult check_storage(const std::string& data_dir, uint64_t max_data_bytes) {
+    if (data_dir.empty()) throw std::invalid_argument("invalid data directory");
+    File directory(::open(data_dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    if (directory.fd < 0) io_error("open data directory");
+    // Require the existing lock: creating it would change the backup, and
+    // scanning without it could race an ordinary engine opening this directory.
+    File lock(open_regular_at(directory.fd, "LOCK", O_RDONLY, true));
+    if (::flock(lock.fd, LOCK_SH | LOCK_NB) != 0) io_error("data directory is already in use");
+    if (!entry_exists(directory.fd, "snapshot.v1")) {
+        if (entry_exists(directory.fd, "wal.v1")) {
+            throw std::runtime_error("snapshot missing beside v1 WAL");
+        }
+        if (entry_exists(directory.fd, "data.db") || entry_exists(directory.fd, "wal.log")) {
+            throw std::runtime_error("legacy text data cannot be checked; import a separate copy first");
+        }
+        throw std::runtime_error("binary database is missing; check does not initialize data");
+    }
+    File snapshot(open_regular_at(directory.fd, "snapshot.v1", O_RDONLY));
+    File wal(open_regular_at(directory.fd, "wal.v1", O_RDONLY, true));
+    StorageImage image;
+    StorageCheckResult result;
+    result.snapshot_sequence = read_snapshot(snapshot.fd, image);
+    result.applied_sequence = result.snapshot_sequence;
+    const auto replay = replay_wal(wal.fd, image, result.applied_sequence);
+    result.data_bytes = recovered_data_bytes(image, max_data_bytes);
+    result.keys = image.size();
+    result.legacy_wal = replay.legacy;
+    result.wal_valid_bytes = static_cast<uint64_t>(replay.valid_bytes);
+    result.wal_trailing_bytes = replay.trailing_bytes;
+    return result;
+}
 
 Engine::Engine(EngineConfig config) : config_(std::move(config)) {
     if (config_.data_dir.empty() || config_.wal_batch_size == 0 || config_.wal_flush_interval.count() <= 0 ||
@@ -448,30 +581,8 @@ void Engine::recover() {
 
 void Engine::load_snapshot() {
     File file(open_regular_at(directory_fd_, "snapshot.v1", O_RDONLY));
-    const std::string header = read_bytes(file.fd, 28);
-    if (header.size() != 28 || header.substr(0, 8) != "MKVSNP01" ||
-        codec::u32(header, 24) != codec::crc32(std::string_view(header).substr(0, 24))) {
-        throw std::runtime_error("corrupt snapshot header");
-    }
-    applied_sequence_ = codec::u64(header, 8);
+    applied_sequence_ = read_snapshot(file.fd, kv_);
     stats_.snapshot_sequence = applied_sequence_;
-    const uint64_t count = codec::u64(header, 16);
-    struct stat metadata{};
-    if (::fstat(file.fd, &metadata) != 0) io_error("stat snapshot");
-    if (count > static_cast<uint64_t>(metadata.st_size) / (codec::kRecordHeader + 5)) {
-        throw std::runtime_error("invalid snapshot entry count");
-    }
-    for (uint64_t i = 0; i < count; ++i) {
-        auto bytes = read_bytes(file.fd, codec::kRecordHeader);
-        const size_t size = codec::record_size(bytes);
-        bytes += read_bytes(file.fd, size - bytes.size());
-        const auto entry = codec::decode_record(bytes);
-        if (entry.operation != Operation::Put || codec::u64(bytes, 5) != applied_sequence_ ||
-            !kv_.emplace(entry.key, entry.value).second) {
-            throw std::runtime_error("invalid snapshot entry");
-        }
-    }
-    if (!read_bytes(file.fd, 1).empty()) throw std::runtime_error("unexpected snapshot trailing bytes");
     // Recovery may observe a rename from an interrupted installation. Make
     // that checkpoint durable before reclaiming any WAL records it covers.
     sync_file(file.fd);
@@ -479,68 +590,23 @@ void Engine::load_snapshot() {
 }
 
 bool Engine::load_wal() {
-    if (::lseek(wal_fd_, 0, SEEK_SET) < 0) io_error("seek WAL");
-    const auto prefix = read_bytes(wal_fd_, 4);
-    const bool legacy = prefix.empty() || prefix == "MKL1";
-    off_t data_start = 0;
-    if (legacy) {
-        if (::lseek(wal_fd_, 0, SEEK_SET) < 0) io_error("seek legacy WAL");
-    } else {
-        const auto header = prefix + read_bytes(wal_fd_, codec::kWalFileHeader - prefix.size());
-        codec::validate_wal_file_header(header);
-        data_start = static_cast<off_t>(codec::kWalFileHeader);
-    }
-    off_t valid_bytes = data_start;
     const uint64_t checkpoint_sequence = applied_sequence_;
-    uint64_t previous = 0;
-    bool incomplete_tail = false;
-    while (true) {
-        const auto header_size = legacy ? codec::kRecordHeader : codec::kWalRecordHeader;
-        std::string bytes = read_bytes(wal_fd_, header_size);
-        if (bytes.empty()) break;
-        if (bytes.size() != header_size) {
-            if (legacy) throw std::runtime_error("incomplete legacy WAL; refusing ambiguous tail repair");
-            incomplete_tail = true;
-            break;
-        }
-        const size_t size = legacy ? codec::record_size(bytes) : codec::wal_record_size(bytes);
-        bytes += read_bytes(wal_fd_, size - bytes.size());
-        if (bytes.size() != size) {
-            // Legacy lengths lack a separate checksum. A corrupt full record
-            // can look exactly like a torn body; leave the original untouched.
-            if (legacy) throw std::runtime_error("incomplete legacy WAL; refusing ambiguous tail repair");
-            incomplete_tail = true;
-            break;
-        }
-        const auto entry = legacy ? codec::decode_record(bytes) : codec::decode_wal_record(bytes);
-        const uint64_t sequence = codec::u64(bytes, 5);
-        if (sequence == 0 || (previous != 0 && sequence != previous + 1)) {
-            throw std::runtime_error("non-contiguous WAL sequence");
-        }
-        previous = sequence;
-        // A crash after snapshot installation can leave the old WAL intact.
-        if (sequence > applied_sequence_) {
-            if (sequence != applied_sequence_ + 1) throw std::runtime_error("missing WAL sequence");
-            if (entry.operation == Operation::Put) kv_[entry.key] = entry.value;
-            else kv_.erase(entry.key);
-            applied_sequence_ = sequence;
-        }
-        valid_bytes += static_cast<off_t>(size);
-    }
+    const auto replay = replay_wal(wal_fd_, kv_, applied_sequence_);
     // The final replayed image, not a historical snapshot or intermediate WAL
     // state, must fit before recovery can repair or replace any original file.
     validate_recovered_data();
     // Legacy recovery is read-only until the ordinary checkpoint upgrade. All
     // repairable v2 truncation boundaries preserve the verified file header.
-    if (!legacy && applied_sequence_ == checkpoint_sequence && (valid_bytes != data_start || incomplete_tail)) {
-        if (::ftruncate(wal_fd_, data_start) != 0) io_error("truncate checkpointed WAL during recovery");
+    if (!replay.legacy && applied_sequence_ == checkpoint_sequence &&
+        (replay.valid_bytes != replay.data_start || replay.trailing_bytes != 0)) {
+        if (::ftruncate(wal_fd_, replay.data_start) != 0) io_error("truncate checkpointed WAL during recovery");
         sync_file(wal_fd_);
-    } else if (!legacy && incomplete_tail) {
-        std::cerr << "discarding incomplete WAL tail at byte " << valid_bytes << '\n';
-        if (::ftruncate(wal_fd_, valid_bytes) != 0) io_error("truncate incomplete WAL tail");
+    } else if (!replay.legacy && replay.trailing_bytes != 0) {
+        std::cerr << "discarding incomplete WAL tail at byte " << replay.valid_bytes << '\n';
+        if (::ftruncate(wal_fd_, replay.valid_bytes) != 0) io_error("truncate incomplete WAL tail");
         sync_file(wal_fd_);
     }
-    return legacy;
+    return replay.legacy;
 }
 
 void Engine::import_legacy() {
@@ -576,18 +642,7 @@ void Engine::fail_locked(const std::string& message) {
 }
 
 void Engine::validate_recovered_data() {
-    uint64_t bytes = 0;
-    for (const auto& entry : kv_) {
-        const uint64_t size = static_cast<uint64_t>(entry.first.size()) + entry.second.size();
-        if (size > std::numeric_limits<uint64_t>::max() - bytes) {
-            throw std::runtime_error("recovered data byte count overflows");
-        }
-        bytes += size;
-        if (config_.max_data_bytes && bytes > config_.max_data_bytes) {
-            throw std::runtime_error("recovered data exceeds configured data byte capacity");
-        }
-    }
-    data_bytes_ = bytes;
+    data_bytes_ = recovered_data_bytes(kv_, config_.max_data_bytes);
 }
 
 // Called only for a validated mutation while the state lock is held. Recompute

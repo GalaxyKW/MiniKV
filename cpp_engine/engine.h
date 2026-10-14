@@ -54,6 +54,24 @@ struct EngineConfig {
     bool import_legacy = false;
 };
 
+struct StorageCheckResult {
+    uint64_t keys = 0;
+    uint64_t data_bytes = 0;
+    uint64_t snapshot_sequence = 0;
+    uint64_t applied_sequence = 0;
+    // Original WAL offsets, before any recovery truncation or format upgrade.
+    // A v2 valid prefix includes its file header. Only v2 may have a short tail.
+    uint64_t wal_valid_bytes = 0;
+    uint64_t wal_trailing_bytes = 0;
+    bool legacy_wal = false;
+};
+
+// Validate an existing binary database while holding its existing LOCK shared.
+// Does not create, repair, synchronize, or upgrade files, or start workers.
+// Throws on invalid/inaccessible storage or an exceeded final data capacity;
+// a nonzero wal_trailing_bytes reports a recoverable v2 tail without changing it.
+StorageCheckResult check_storage(const std::string& data_dir, uint64_t max_data_bytes = 0);
+
 // One state-lock snapshot. Counters reset on restart; sequences are recovered.
 // Duration counters include failed attempts and use monotonic nanoseconds.
 struct EngineStats {
