@@ -1,0 +1,2090 @@
+{
+  "schema_version": 1,
+  "units": {
+    "qps_successful": "requests/s",
+    "p99_ms": "ms",
+    "memory": "bytes"
+  },
+  "experiments": [
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 20,
+        "delete_ratio": 0,
+        "value_size": 1024,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "errors": [],
+      "warnings": [],
+      "binary_verification": "copies_verified",
+      "process_guard_verification": "copy_verified",
+      "binary_sha256": {
+        "engine": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "groups": [
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-off",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 29495.875175631638,
+              "p99_ms": 2.682143,
+              "snapshot_activity_observed": null,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 121679872,
+                  "observed_lifetime_hwm_bytes": 121679872
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15085568,
+                  "observed_lifetime_hwm_bytes": 15085568
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29048832,
+                  "observed_lifetime_hwm_bytes": 29048832
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 29495.875175631638,
+              "median": 29495.875175631638,
+              "max": 29495.875175631638
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 2.682143,
+              "median": 2.682143,
+              "max": 2.682143
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 121679872,
+                  "median": 121679872,
+                  "max": 121679872
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 121679872,
+                  "median": 121679872,
+                  "max": 121679872
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15085568,
+                  "median": 15085568,
+                  "max": 15085568
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15085568,
+                  "median": 15085568,
+                  "max": 15085568
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29048832,
+                  "median": 29048832,
+                  "max": 29048832
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29048832,
+                  "median": 29048832,
+                  "max": 29048832
+                }
+              }
+            }
+          }
+        },
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-on",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 26676.74404361863,
+              "p99_ms": 3.318732,
+              "snapshot_activity_observed": true,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 237400064,
+                  "observed_lifetime_hwm_bytes": 237400064
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15073280,
+                  "observed_lifetime_hwm_bytes": 15073280
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29175808,
+                  "observed_lifetime_hwm_bytes": 29175808
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 26676.74404361863,
+              "median": 26676.74404361863,
+              "max": 26676.74404361863
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 3.318732,
+              "median": 3.318732,
+              "max": 3.318732
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 237400064,
+                  "median": 237400064,
+                  "max": 237400064
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 237400064,
+                  "median": 237400064,
+                  "max": 237400064
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15073280,
+                  "median": 15073280,
+                  "max": 15073280
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15073280,
+                  "median": 15073280,
+                  "max": 15073280
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29175808,
+                  "median": 29175808,
+                  "max": 29175808
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29175808,
+                  "median": 29175808,
+                  "max": 29175808
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 20,
+        "delete_ratio": 0,
+        "value_size": 1024,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "errors": [],
+      "warnings": [],
+      "binary_verification": "copies_verified",
+      "process_guard_verification": "copy_verified",
+      "binary_sha256": {
+        "engine": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "groups": [
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-off",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 25167.302934997708,
+              "p99_ms": 3.569581,
+              "snapshot_activity_observed": null,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 121688064,
+                  "observed_lifetime_hwm_bytes": 121688064
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 14835712,
+                  "observed_lifetime_hwm_bytes": 14835712
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29155328,
+                  "observed_lifetime_hwm_bytes": 29155328
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 25167.302934997708,
+              "median": 25167.302934997708,
+              "max": 25167.302934997708
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 3.569581,
+              "median": 3.569581,
+              "max": 3.569581
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 121688064,
+                  "median": 121688064,
+                  "max": 121688064
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 121688064,
+                  "median": 121688064,
+                  "max": 121688064
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 14835712,
+                  "median": 14835712,
+                  "max": 14835712
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 14835712,
+                  "median": 14835712,
+                  "max": 14835712
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29155328,
+                  "median": 29155328,
+                  "max": 29155328
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29155328,
+                  "median": 29155328,
+                  "max": 29155328
+                }
+              }
+            }
+          }
+        },
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-on",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 24090.78279757551,
+              "p99_ms": 7.115318,
+              "snapshot_activity_observed": true,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 232669184,
+                  "observed_lifetime_hwm_bytes": 232669184
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15089664,
+                  "observed_lifetime_hwm_bytes": 15089664
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29241344,
+                  "observed_lifetime_hwm_bytes": 29253632
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 24090.78279757551,
+              "median": 24090.78279757551,
+              "max": 24090.78279757551
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 7.115318,
+              "median": 7.115318,
+              "max": 7.115318
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 232669184,
+                  "median": 232669184,
+                  "max": 232669184
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 232669184,
+                  "median": 232669184,
+                  "max": 232669184
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15089664,
+                  "median": 15089664,
+                  "max": 15089664
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15089664,
+                  "median": 15089664,
+                  "max": 15089664
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29241344,
+                  "median": 29241344,
+                  "max": 29241344
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29253632,
+                  "median": 29253632,
+                  "max": 29253632
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 20,
+        "delete_ratio": 0,
+        "value_size": 1024,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "errors": [],
+      "warnings": [],
+      "binary_verification": "copies_verified",
+      "process_guard_verification": "copy_verified",
+      "binary_sha256": {
+        "engine": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "groups": [
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-off",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 23663.675113764213,
+              "p99_ms": 7.90958,
+              "snapshot_activity_observed": null,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 121643008,
+                  "observed_lifetime_hwm_bytes": 121643008
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15081472,
+                  "observed_lifetime_hwm_bytes": 15130624
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29200384,
+                  "observed_lifetime_hwm_bytes": 29200384
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 23663.675113764213,
+              "median": 23663.675113764213,
+              "max": 23663.675113764213
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 7.90958,
+              "median": 7.90958,
+              "max": 7.90958
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 121643008,
+                  "median": 121643008,
+                  "max": 121643008
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 121643008,
+                  "median": 121643008,
+                  "max": 121643008
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15081472,
+                  "median": 15081472,
+                  "max": 15081472
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15130624,
+                  "median": 15130624,
+                  "max": 15130624
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29200384,
+                  "median": 29200384,
+                  "max": 29200384
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29200384,
+                  "median": 29200384,
+                  "max": 29200384
+                }
+              }
+            }
+          }
+        },
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-on",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 22010.463189073933,
+              "p99_ms": 8.179913,
+              "snapshot_activity_observed": true,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 232697856,
+                  "observed_lifetime_hwm_bytes": 232697856
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 14848000,
+                  "observed_lifetime_hwm_bytes": 15085568
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29114368,
+                  "observed_lifetime_hwm_bytes": 29114368
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 22010.463189073933,
+              "median": 22010.463189073933,
+              "max": 22010.463189073933
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 8.179913,
+              "median": 8.179913,
+              "max": 8.179913
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 232697856,
+                  "median": 232697856,
+                  "max": 232697856
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 232697856,
+                  "median": 232697856,
+                  "max": 232697856
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 14848000,
+                  "median": 14848000,
+                  "max": 14848000
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15085568,
+                  "median": 15085568,
+                  "max": 15085568
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29114368,
+                  "median": 29114368,
+                  "max": 29114368
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29114368,
+                  "median": 29114368,
+                  "max": 29114368
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 20,
+        "delete_ratio": 0,
+        "value_size": 1024,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "errors": [],
+      "warnings": [],
+      "binary_verification": "copies_verified",
+      "process_guard_verification": "copy_verified",
+      "binary_sha256": {
+        "engine": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "groups": [
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-off",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 23011.46838729381,
+              "p99_ms": 8.065928,
+              "snapshot_activity_observed": null,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 120950784,
+                  "observed_lifetime_hwm_bytes": 120950784
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15093760,
+                  "observed_lifetime_hwm_bytes": 15093760
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29220864,
+                  "observed_lifetime_hwm_bytes": 29220864
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 23011.46838729381,
+              "median": 23011.46838729381,
+              "max": 23011.46838729381
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 8.065928,
+              "median": 8.065928,
+              "max": 8.065928
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 120950784,
+                  "median": 120950784,
+                  "max": 120950784
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 120950784,
+                  "median": 120950784,
+                  "max": 120950784
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15093760,
+                  "median": 15093760,
+                  "max": 15093760
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15093760,
+                  "median": 15093760,
+                  "max": 15093760
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29220864,
+                  "median": 29220864,
+                  "max": 29220864
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29220864,
+                  "median": 29220864,
+                  "max": 29220864
+                }
+              }
+            }
+          }
+        },
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-on",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 21523.02114408453,
+              "p99_ms": 8.315216,
+              "snapshot_activity_observed": true,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 236498944,
+                  "observed_lifetime_hwm_bytes": 236498944
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15093760,
+                  "observed_lifetime_hwm_bytes": 15093760
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 28745728,
+                  "observed_lifetime_hwm_bytes": 28762112
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 21523.02114408453,
+              "median": 21523.02114408453,
+              "max": 21523.02114408453
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 8.315216,
+              "median": 8.315216,
+              "max": 8.315216
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 236498944,
+                  "median": 236498944,
+                  "max": 236498944
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 236498944,
+                  "median": 236498944,
+                  "max": 236498944
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15093760,
+                  "median": 15093760,
+                  "max": 15093760
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15093760,
+                  "median": 15093760,
+                  "max": 15093760
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 28745728,
+                  "median": 28745728,
+                  "max": 28745728
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 28762112,
+                  "median": 28762112,
+                  "max": 28762112
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 80,
+        "delete_ratio": 0,
+        "value_size": 128,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "errors": [],
+      "warnings": [],
+      "binary_verification": "copies_verified",
+      "process_guard_verification": "copy_verified",
+      "binary_sha256": {
+        "engine": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "groups": [
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-off",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 21564.411146995906,
+              "p99_ms": 8.328862,
+              "snapshot_activity_observed": null,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 31162368,
+                  "observed_lifetime_hwm_bytes": 31162368
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15036416,
+                  "observed_lifetime_hwm_bytes": 15036416
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29138944,
+                  "observed_lifetime_hwm_bytes": 29138944
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 21564.411146995906,
+              "median": 21564.411146995906,
+              "max": 21564.411146995906
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 8.328862,
+              "median": 8.328862,
+              "max": 8.328862
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 31162368,
+                  "median": 31162368,
+                  "max": 31162368
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 31162368,
+                  "median": 31162368,
+                  "max": 31162368
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15036416,
+                  "median": 15036416,
+                  "max": 15036416
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15036416,
+                  "median": 15036416,
+                  "max": 15036416
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29138944,
+                  "median": 29138944,
+                  "max": 29138944
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29138944,
+                  "median": 29138944,
+                  "max": 29138944
+                }
+              }
+            }
+          }
+        },
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-on",
+              "status": "valid",
+              "errors": [],
+              "warnings": [
+                "bench resource sample unavailable; no memory values in this sample"
+              ],
+              "qps_successful": 21740.124941524173,
+              "p99_ms": 8.25527,
+              "snapshot_activity_observed": true,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 56668160,
+                  "observed_lifetime_hwm_bytes": 56668160
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15273984,
+                  "observed_lifetime_hwm_bytes": 15273984
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 28717056,
+                  "observed_lifetime_hwm_bytes": 28717056
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 21740.124941524173,
+              "median": 21740.124941524173,
+              "max": 21740.124941524173
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 8.25527,
+              "median": 8.25527,
+              "max": 8.25527
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 56668160,
+                  "median": 56668160,
+                  "max": 56668160
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 56668160,
+                  "median": 56668160,
+                  "max": 56668160
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15273984,
+                  "median": 15273984,
+                  "max": 15273984
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15273984,
+                  "median": 15273984,
+                  "max": 15273984
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 28717056,
+                  "median": 28717056,
+                  "max": 28717056
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 28717056,
+                  "median": 28717056,
+                  "max": 28717056
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 80,
+        "delete_ratio": 0,
+        "value_size": 128,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "errors": [],
+      "warnings": [],
+      "binary_verification": "copies_verified",
+      "process_guard_verification": "copy_verified",
+      "binary_sha256": {
+        "engine": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "groups": [
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-off",
+              "status": "valid",
+              "errors": [],
+              "warnings": [
+                "bench resource sample unavailable; no memory values in this sample"
+              ],
+              "qps_successful": 21437.847061758453,
+              "p99_ms": 8.33427,
+              "snapshot_activity_observed": null,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 31158272,
+                  "observed_lifetime_hwm_bytes": 31158272
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 14983168,
+                  "observed_lifetime_hwm_bytes": 14983168
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29138944,
+                  "observed_lifetime_hwm_bytes": 29138944
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 21437.847061758453,
+              "median": 21437.847061758453,
+              "max": 21437.847061758453
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 8.33427,
+              "median": 8.33427,
+              "max": 8.33427
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 31158272,
+                  "median": 31158272,
+                  "max": 31158272
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 31158272,
+                  "median": 31158272,
+                  "max": 31158272
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 14983168,
+                  "median": 14983168,
+                  "max": 14983168
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 14983168,
+                  "median": 14983168,
+                  "max": 14983168
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29138944,
+                  "median": 29138944,
+                  "max": 29138944
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29138944,
+                  "median": 29138944,
+                  "max": 29138944
+                }
+              }
+            }
+          }
+        },
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-on",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 25592.48182347153,
+              "p99_ms": 7.770448,
+              "snapshot_activity_observed": true,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 52699136,
+                  "observed_lifetime_hwm_bytes": 52699136
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 14954496,
+                  "observed_lifetime_hwm_bytes": 14954496
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29134848,
+                  "observed_lifetime_hwm_bytes": 29134848
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 25592.48182347153,
+              "median": 25592.48182347153,
+              "max": 25592.48182347153
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 7.770448,
+              "median": 7.770448,
+              "max": 7.770448
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 52699136,
+                  "median": 52699136,
+                  "max": 52699136
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 52699136,
+                  "median": 52699136,
+                  "max": 52699136
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 14954496,
+                  "median": 14954496,
+                  "max": 14954496
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 14954496,
+                  "median": 14954496,
+                  "max": 14954496
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29134848,
+                  "median": 29134848,
+                  "max": 29134848
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29134848,
+                  "median": 29134848,
+                  "max": 29134848
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 80,
+        "delete_ratio": 0,
+        "value_size": 128,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "errors": [],
+      "warnings": [],
+      "binary_verification": "copies_verified",
+      "process_guard_verification": "copy_verified",
+      "binary_sha256": {
+        "engine": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "groups": [
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-off",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 29164.220532130126,
+              "p99_ms": 2.759141,
+              "snapshot_activity_observed": null,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 31154176,
+                  "observed_lifetime_hwm_bytes": 31154176
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15003648,
+                  "observed_lifetime_hwm_bytes": 15003648
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 28639232,
+                  "observed_lifetime_hwm_bytes": 28655616
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 29164.220532130126,
+              "median": 29164.220532130126,
+              "max": 29164.220532130126
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 2.759141,
+              "median": 2.759141,
+              "max": 2.759141
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 31154176,
+                  "median": 31154176,
+                  "max": 31154176
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 31154176,
+                  "median": 31154176,
+                  "max": 31154176
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15003648,
+                  "median": 15003648,
+                  "max": 15003648
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15003648,
+                  "median": 15003648,
+                  "max": 15003648
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 28639232,
+                  "median": 28639232,
+                  "max": 28639232
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 28655616,
+                  "median": 28655616,
+                  "max": 28655616
+                }
+              }
+            }
+          }
+        },
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-on",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 29284.2940000072,
+              "p99_ms": 2.701131,
+              "snapshot_activity_observed": true,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 52760576,
+                  "observed_lifetime_hwm_bytes": 52760576
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 15020032,
+                  "observed_lifetime_hwm_bytes": 15020032
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29138944,
+                  "observed_lifetime_hwm_bytes": 29138944
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 29284.2940000072,
+              "median": 29284.2940000072,
+              "max": 29284.2940000072
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 2.701131,
+              "median": 2.701131,
+              "max": 2.701131
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 52760576,
+                  "median": 52760576,
+                  "max": 52760576
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 52760576,
+                  "median": 52760576,
+                  "max": 52760576
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 15020032,
+                  "median": 15020032,
+                  "max": 15020032
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 15020032,
+                  "median": 15020032,
+                  "max": 15020032
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29138944,
+                  "median": 29138944,
+                  "max": 29138944
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29138944,
+                  "median": 29138944,
+                  "max": 29138944
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 80,
+        "delete_ratio": 0,
+        "value_size": 128,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "errors": [],
+      "warnings": [],
+      "binary_verification": "copies_verified",
+      "process_guard_verification": "copy_verified",
+      "binary_sha256": {
+        "engine": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "groups": [
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-off",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 29947.091179699546,
+              "p99_ms": 2.568724,
+              "snapshot_activity_observed": null,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 31178752,
+                  "observed_lifetime_hwm_bytes": 31178752
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 14667776,
+                  "observed_lifetime_hwm_bytes": 14684160
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29089792,
+                  "observed_lifetime_hwm_bytes": 29089792
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 29947.091179699546,
+              "median": 29947.091179699546,
+              "max": 29947.091179699546
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 2.568724,
+              "median": 2.568724,
+              "max": 2.568724
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 31178752,
+                  "median": 31178752,
+                  "max": 31178752
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 31178752,
+                  "median": 31178752,
+                  "max": 31178752
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 14667776,
+                  "median": 14667776,
+                  "max": 14667776
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 14684160,
+                  "median": 14684160,
+                  "max": 14684160
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29089792,
+                  "median": 29089792,
+                  "max": 29089792
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29089792,
+                  "median": 29089792,
+                  "max": 29089792
+                }
+              }
+            }
+          }
+        },
+        {
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "runs": [
+            {
+              "name": "r01-throughput-snapshot-on",
+              "status": "valid",
+              "errors": [],
+              "warnings": [],
+              "qps_successful": 29931.587601021565,
+              "p99_ms": 2.53186,
+              "snapshot_activity_observed": true,
+              "snapshot_comparison_eligible": true,
+              "memory": {
+                "engine": {
+                  "measurement_sampled_rss_max_bytes": 56725504,
+                  "observed_lifetime_hwm_bytes": 56725504
+                },
+                "gateway": {
+                  "measurement_sampled_rss_max_bytes": 14708736,
+                  "observed_lifetime_hwm_bytes": 14708736
+                },
+                "bench": {
+                  "measurement_sampled_rss_max_bytes": 29048832,
+                  "observed_lifetime_hwm_bytes": 29048832
+                }
+              },
+              "workload_generator": "indexed-pcg-v1"
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "valid": 1,
+            "degraded": 0,
+            "failed": 0,
+            "interrupted": 0,
+            "missing": 0,
+            "incomplete": 0,
+            "invalid": 0,
+            "unfinished": 0,
+            "snapshot_evidence_insufficient": 0
+          },
+          "distributions": {
+            "qps_successful": {
+              "n": 1,
+              "min": 29931.587601021565,
+              "median": 29931.587601021565,
+              "max": 29931.587601021565
+            },
+            "p99_ms": {
+              "n": 1,
+              "min": 2.53186,
+              "median": 2.53186,
+              "max": 2.53186
+            },
+            "memory": {
+              "engine": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 56725504,
+                  "median": 56725504,
+                  "max": 56725504
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 56725504,
+                  "median": 56725504,
+                  "max": 56725504
+                }
+              },
+              "gateway": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 14708736,
+                  "median": 14708736,
+                  "max": 14708736
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 14708736,
+                  "median": 14708736,
+                  "max": 14708736
+                }
+              },
+              "bench": {
+                "measurement_sampled_rss_max_bytes": {
+                  "n": 1,
+                  "min": 29048832,
+                  "median": 29048832,
+                  "max": 29048832
+                },
+                "observed_lifetime_hwm_bytes": {
+                  "n": 1,
+                  "min": 29048832,
+                  "median": 29048832,
+                  "max": 29048832
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "counts": {
+    "planned": 16,
+    "valid": 16,
+    "degraded": 0,
+    "failed": 0,
+    "interrupted": 0,
+    "missing": 0,
+    "incomplete": 0,
+    "invalid": 0,
+    "unfinished": 0,
+    "snapshot_evidence_insufficient": 0
+  }
+}

@@ -1,0 +1,2517 @@
+{
+  "schema_version": 1,
+  "thresholds": {
+    "min_completed": 3,
+    "min_measurement_seconds": 20
+  },
+  "experiments": [
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 20,
+        "delete_ratio": 0,
+        "value_size": 1024,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "binary_verification": "copies_verified",
+      "binary_sha256": {
+        "engine": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "errors": [],
+      "warnings": [],
+      "runs": [
+        {
+          "name": "r01-throughput-snapshot-off",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "client": {
+            "status": "valid",
+            "qps_successful": 29495.875175631638,
+            "p99_ms": 2.682143,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "insufficient",
+              "reasons": [
+                "Completed snapshots are below min_completed."
+              ],
+              "measurement_elapsed_ns": 33903045563,
+              "internal_samples": 130,
+              "idle_samples": 130,
+              "failed_queries": 0,
+              "completed": 0,
+              "window": {
+                "first": {
+                  "line": 84,
+                  "started_at": "2026-10-14T05:34:54.437332+00:00",
+                  "finished_at": "2026-10-14T05:34:54.438769+00:00"
+                },
+                "last": {
+                  "line": 213,
+                  "started_at": "2026-10-14T05:35:28.040210+00:00",
+                  "finished_at": "2026-10-14T05:35:28.043007+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1963,
+                "end": 1963,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4561582,
+                "end": 4561582,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4944680,
+                "end": 4944680,
+                "delta": 0,
+                "mean_ns": null
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 454,
+                "end": 454,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 454,
+                "end": 454,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24,
+                "end": 24,
+                "delta": 0
+              }
+            },
+            "capture_hold_mean_ns": null,
+            "warnings": [],
+            "errors": []
+          }
+        },
+        {
+          "name": "r01-throughput-snapshot-on",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "client": {
+            "status": "valid",
+            "qps_successful": 26676.74404361863,
+            "p99_ms": 3.318732,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "sufficient",
+              "reasons": [],
+              "measurement_elapsed_ns": 37485834042,
+              "internal_samples": 144,
+              "idle_samples": 131,
+              "failed_queries": 0,
+              "completed": 6,
+              "window": {
+                "first": {
+                  "line": 86,
+                  "started_at": "2026-10-14T05:35:50.052098+00:00",
+                  "finished_at": "2026-10-14T05:35:50.053894+00:00"
+                },
+                "last": {
+                  "line": 228,
+                  "started_at": "2026-10-14T05:36:27.061371+00:00",
+                  "finished_at": "2026-10-14T05:36:27.064683+00:00"
+                },
+                "trimmed_head_samples": 1,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 214258722,
+                "end": 603165078,
+                "delta": 388906356,
+                "mean_ns": 64817726.0
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1067501460,
+                "end": 4010925823,
+                "delta": 2943424363,
+                "mean_ns": 490570727.1666667
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 58170932,
+                "end": 169454602,
+                "delta": 111283670,
+                "mean_ns": 18547278.333333332
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 5,
+                "end": 11,
+                "delta": 6
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 184909278,
+                "end": 538941428,
+                "delta": 354032150
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 70885996,
+                "end": 70885996,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 3930,
+                "end": 13608,
+                "delta": 9678
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 256837650,
+                "end": 889771158,
+                "delta": 632933508
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 256837650,
+                "end": 889771158,
+                "delta": 632933508
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 5611667,
+                "end": 19522447,
+                "delta": 13910780
+              }
+            },
+            "capture_hold_mean_ns": 59005358.333333336,
+            "warnings": [],
+            "errors": []
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 20,
+        "delete_ratio": 0,
+        "value_size": 1024,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "binary_verification": "copies_verified",
+      "binary_sha256": {
+        "engine": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "errors": [],
+      "warnings": [],
+      "runs": [
+        {
+          "name": "r01-throughput-snapshot-off",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "client": {
+            "status": "valid",
+            "qps_successful": 25167.302934997708,
+            "p99_ms": 3.569581,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "insufficient",
+              "reasons": [
+                "Completed snapshots are below min_completed."
+              ],
+              "measurement_elapsed_ns": 39734094773,
+              "internal_samples": 153,
+              "idle_samples": 153,
+              "failed_queries": 0,
+              "completed": 0,
+              "window": {
+                "first": {
+                  "line": 83,
+                  "started_at": "2026-10-14T05:36:48.479136+00:00",
+                  "finished_at": "2026-10-14T05:36:48.480851+00:00"
+                },
+                "last": {
+                  "line": 235,
+                  "started_at": "2026-10-14T05:37:27.958003+00:00",
+                  "finished_at": "2026-10-14T05:37:27.960912+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 2648,
+                "end": 2648,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4745671,
+                "end": 4745671,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4860435,
+                "end": 4860435,
+                "delta": 0,
+                "mean_ns": null
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 247,
+                "end": 247,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 247,
+                "end": 247,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24,
+                "end": 24,
+                "delta": 0
+              }
+            },
+            "capture_hold_mean_ns": null,
+            "warnings": [],
+            "errors": []
+          }
+        },
+        {
+          "name": "r01-throughput-snapshot-on",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "client": {
+            "status": "valid",
+            "qps_successful": 24090.78279757551,
+            "p99_ms": 7.115318,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "sufficient",
+              "reasons": [],
+              "measurement_elapsed_ns": 41509651571,
+              "internal_samples": 160,
+              "idle_samples": 141,
+              "failed_queries": 0,
+              "completed": 8,
+              "window": {
+                "first": {
+                  "line": 83,
+                  "started_at": "2026-10-14T05:37:49.173770+00:00",
+                  "finished_at": "2026-10-14T05:37:49.176440+00:00"
+                },
+                "last": {
+                  "line": 242,
+                  "started_at": "2026-10-14T05:38:30.480864+00:00",
+                  "finished_at": "2026-10-14T05:38:30.483792+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 117020007,
+                "end": 607301782,
+                "delta": 490281775,
+                "mean_ns": 61285221.875
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 655919144,
+                "end": 4884223806,
+                "delta": 4228304662,
+                "mean_ns": 528538082.75
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 45501181,
+                "end": 196861184,
+                "delta": 151360003,
+                "mean_ns": 18920000.375
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4,
+                "end": 12,
+                "delta": 8
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 108573384,
+                "end": 551532300,
+                "delta": 442958916
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 54182443,
+                "end": 69570591,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 2409,
+                "end": 15313,
+                "delta": 12904
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 157410762,
+                "end": 1001322106,
+                "delta": 843911344
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 157410762,
+                "end": 1001322106,
+                "delta": 843911344
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 3133677,
+                "end": 22144019,
+                "delta": 19010342
+              }
+            },
+            "capture_hold_mean_ns": 55369864.5,
+            "warnings": [],
+            "errors": []
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 20,
+        "delete_ratio": 0,
+        "value_size": 1024,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "binary_verification": "copies_verified",
+      "binary_sha256": {
+        "engine": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "errors": [],
+      "warnings": [],
+      "runs": [
+        {
+          "name": "r01-throughput-snapshot-off",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "client": {
+            "status": "valid",
+            "qps_successful": 23663.675113764213,
+            "p99_ms": 7.90958,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "insufficient",
+              "reasons": [
+                "Completed snapshots are below min_completed."
+              ],
+              "measurement_elapsed_ns": 42258862801,
+              "internal_samples": 163,
+              "idle_samples": 163,
+              "failed_queries": 0,
+              "completed": 0,
+              "window": {
+                "first": {
+                  "line": 84,
+                  "started_at": "2026-10-14T05:38:52.129603+00:00",
+                  "finished_at": "2026-10-14T05:38:52.135917+00:00"
+                },
+                "last": {
+                  "line": 246,
+                  "started_at": "2026-10-14T05:39:34.162389+00:00",
+                  "finished_at": "2026-10-14T05:39:34.166677+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1265,
+                "end": 1265,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 10224022,
+                "end": 10224022,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 5034955,
+                "end": 5034955,
+                "delta": 0,
+                "mean_ns": null
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 57,
+                "end": 57,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 57,
+                "end": 57,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24,
+                "end": 24,
+                "delta": 0
+              }
+            },
+            "capture_hold_mean_ns": null,
+            "warnings": [],
+            "errors": []
+          }
+        },
+        {
+          "name": "r01-throughput-snapshot-on",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "client": {
+            "status": "valid",
+            "qps_successful": 22010.463189073933,
+            "p99_ms": 8.179913,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "sufficient",
+              "reasons": [],
+              "measurement_elapsed_ns": 45432937572,
+              "internal_samples": 175,
+              "idle_samples": 154,
+              "failed_queries": 0,
+              "completed": 7,
+              "window": {
+                "first": {
+                  "line": 87,
+                  "started_at": "2026-10-14T05:39:56.345309+00:00",
+                  "finished_at": "2026-10-14T05:39:56.347355+00:00"
+                },
+                "last": {
+                  "line": 257,
+                  "started_at": "2026-10-14T05:40:40.596979+00:00",
+                  "finished_at": "2026-10-14T05:40:40.598649+00:00"
+                },
+                "trimmed_head_samples": 2,
+                "trimmed_tail_samples": 2
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 185874337,
+                "end": 638794515,
+                "delta": 452920178,
+                "mean_ns": 64702882.571428575
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1408892600,
+                "end": 5099227673,
+                "delta": 3690335073,
+                "mean_ns": 527190724.71428573
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 62983719,
+                "end": 203483450,
+                "delta": 140499731,
+                "mean_ns": 20071390.14285714
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 5,
+                "end": 12,
+                "delta": 7
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 173240978,
+                "end": 577768236,
+                "delta": 404527258
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 55579336,
+                "end": 69816068,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 3939,
+                "end": 15230,
+                "delta": 11291
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 257397855,
+                "end": 995820281,
+                "delta": 738422426
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 257397855,
+                "end": 995820281,
+                "delta": 738422426
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 5337291,
+                "end": 21614682,
+                "delta": 16277391
+              }
+            },
+            "capture_hold_mean_ns": 57789608.28571428,
+            "warnings": [],
+            "errors": []
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 20,
+        "delete_ratio": 0,
+        "value_size": 1024,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "binary_verification": "copies_verified",
+      "binary_sha256": {
+        "engine": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "errors": [],
+      "warnings": [],
+      "runs": [
+        {
+          "name": "r01-throughput-snapshot-off",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "client": {
+            "status": "valid",
+            "qps_successful": 23011.46838729381,
+            "p99_ms": 8.065928,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "insufficient",
+              "reasons": [
+                "Completed snapshots are below min_completed."
+              ],
+              "measurement_elapsed_ns": 43456592303,
+              "internal_samples": 167,
+              "idle_samples": 167,
+              "failed_queries": 0,
+              "completed": 0,
+              "window": {
+                "first": {
+                  "line": 84,
+                  "started_at": "2026-10-14T05:41:02.905361+00:00",
+                  "finished_at": "2026-10-14T05:41:02.908362+00:00"
+                },
+                "last": {
+                  "line": 250,
+                  "started_at": "2026-10-14T05:41:46.019942+00:00",
+                  "finished_at": "2026-10-14T05:41:46.023831+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1649,
+                "end": 1649,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 8853337,
+                "end": 8853337,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4730349,
+                "end": 4730349,
+                "delta": 0,
+                "mean_ns": null
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 415,
+                "end": 415,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 415,
+                "end": 415,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24,
+                "end": 24,
+                "delta": 0
+              }
+            },
+            "capture_hold_mean_ns": null,
+            "warnings": [],
+            "errors": []
+          }
+        },
+        {
+          "name": "r01-throughput-snapshot-on",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "client": {
+            "status": "valid",
+            "qps_successful": 21523.02114408453,
+            "p99_ms": 8.315216,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "sufficient",
+              "reasons": [],
+              "measurement_elapsed_ns": 46461878809,
+              "internal_samples": 179,
+              "idle_samples": 158,
+              "failed_queries": 0,
+              "completed": 8,
+              "window": {
+                "first": {
+                  "line": 88,
+                  "started_at": "2026-10-14T05:42:08.815767+00:00",
+                  "finished_at": "2026-10-14T05:42:08.819349+00:00"
+                },
+                "last": {
+                  "line": 266,
+                  "started_at": "2026-10-14T05:42:55.144736+00:00",
+                  "finished_at": "2026-10-14T05:42:55.146924+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 196182507,
+                "end": 880782993,
+                "delta": 684600486,
+                "mean_ns": 85575060.75
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1060018812,
+                "end": 5499107964,
+                "delta": 4439089152,
+                "mean_ns": 554886144.0
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 55334200,
+                "end": 228463940,
+                "delta": 173129740,
+                "mean_ns": 21641217.5
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 5,
+                "end": 13,
+                "delta": 8
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 181457688,
+                "end": 710135313,
+                "delta": 528677625
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 75976185,
+                "end": 75976185,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 3732,
+                "end": 16636,
+                "delta": 12904
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 243853765,
+                "end": 1087765109,
+                "delta": 843911344
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 243853765,
+                "end": 1087765109,
+                "delta": 843911344
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4753971,
+                "end": 23685031,
+                "delta": 18931060
+              }
+            },
+            "capture_hold_mean_ns": 66084703.125,
+            "warnings": [],
+            "errors": []
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 80,
+        "delete_ratio": 0,
+        "value_size": 128,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "binary_verification": "copies_verified",
+      "binary_sha256": {
+        "engine": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "errors": [],
+      "warnings": [],
+      "runs": [
+        {
+          "name": "r01-throughput-snapshot-off",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "client": {
+            "status": "valid",
+            "qps_successful": 21564.411146995906,
+            "p99_ms": 8.328862,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "insufficient",
+              "reasons": [
+                "Completed snapshots are below min_completed."
+              ],
+              "measurement_elapsed_ns": 46372701447,
+              "internal_samples": 179,
+              "idle_samples": 179,
+              "failed_queries": 0,
+              "completed": 0,
+              "window": {
+                "first": {
+                  "line": 77,
+                  "started_at": "2026-10-14T05:43:15.038866+00:00",
+                  "finished_at": "2026-10-14T05:43:15.040799+00:00"
+                },
+                "last": {
+                  "line": 255,
+                  "started_at": "2026-10-14T05:44:01.313146+00:00",
+                  "finished_at": "2026-10-14T05:44:01.316317+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1822,
+                "end": 1822,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4958631,
+                "end": 4958631,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4513128,
+                "end": 4513128,
+                "delta": 0,
+                "mean_ns": null
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 423,
+                "end": 423,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 423,
+                "end": 423,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24,
+                "end": 24,
+                "delta": 0
+              }
+            },
+            "capture_hold_mean_ns": null,
+            "warnings": [],
+            "errors": []
+          }
+        },
+        {
+          "name": "r01-throughput-snapshot-on",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "client": {
+            "status": "valid",
+            "qps_successful": 21740.124941524173,
+            "p99_ms": 8.25527,
+            "errors": [],
+            "warnings": [
+              "bench resource sample unavailable; no memory values in this sample"
+            ]
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "sufficient",
+              "reasons": [],
+              "measurement_elapsed_ns": 45997895720,
+              "internal_samples": 177,
+              "idle_samples": 173,
+              "failed_queries": 0,
+              "completed": 9,
+              "window": {
+                "first": {
+                  "line": 77,
+                  "started_at": "2026-10-14T05:44:21.042553+00:00",
+                  "finished_at": "2026-10-14T05:44:21.044798+00:00"
+                },
+                "last": {
+                  "line": 253,
+                  "started_at": "2026-10-14T05:45:06.867569+00:00",
+                  "finished_at": "2026-10-14T05:45:06.873257+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 72035505,
+                "end": 435280297,
+                "delta": 363244792,
+                "mean_ns": 40360532.44444445
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 154101881,
+                "end": 1178523664,
+                "delta": 1024421783,
+                "mean_ns": 113824642.55555555
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28159346,
+                "end": 168153744,
+                "delta": 139994398,
+                "mean_ns": 15554933.111111112
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4,
+                "end": 13,
+                "delta": 9
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 63861270,
+                "end": 388285589,
+                "delta": 324424319
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 35604203,
+                "end": 46842828,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 372,
+                "end": 2559,
+                "delta": 2187
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24224299,
+                "end": 167224561,
+                "delta": 143000262
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24224299,
+                "end": 167224561,
+                "delta": 143000262
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 128377,
+                "end": 2856503,
+                "delta": 2728126
+              }
+            },
+            "capture_hold_mean_ns": 36047146.55555555,
+            "warnings": [],
+            "errors": []
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 80,
+        "delete_ratio": 0,
+        "value_size": 128,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "binary_verification": "copies_verified",
+      "binary_sha256": {
+        "engine": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "errors": [],
+      "warnings": [],
+      "runs": [
+        {
+          "name": "r01-throughput-snapshot-off",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "client": {
+            "status": "valid",
+            "qps_successful": 21437.847061758453,
+            "p99_ms": 8.33427,
+            "errors": [],
+            "warnings": [
+              "bench resource sample unavailable; no memory values in this sample"
+            ]
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "insufficient",
+              "reasons": [
+                "Completed snapshots are below min_completed."
+              ],
+              "measurement_elapsed_ns": 46646475139,
+              "internal_samples": 179,
+              "idle_samples": 179,
+              "failed_queries": 0,
+              "completed": 0,
+              "window": {
+                "first": {
+                  "line": 77,
+                  "started_at": "2026-10-14T05:45:26.999697+00:00",
+                  "finished_at": "2026-10-14T05:45:27.002233+00:00"
+                },
+                "last": {
+                  "line": 255,
+                  "started_at": "2026-10-14T05:46:13.301383+00:00",
+                  "finished_at": "2026-10-14T05:46:13.303465+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1326,
+                "end": 1326,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4955718,
+                "end": 4955718,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4896422,
+                "end": 4896422,
+                "delta": 0,
+                "mean_ns": null
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 70,
+                "end": 70,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 70,
+                "end": 70,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24,
+                "end": 24,
+                "delta": 0
+              }
+            },
+            "capture_hold_mean_ns": null,
+            "warnings": [],
+            "errors": []
+          }
+        },
+        {
+          "name": "r01-throughput-snapshot-on",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "client": {
+            "status": "valid",
+            "qps_successful": 25592.48182347153,
+            "p99_ms": 7.770448,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "sufficient",
+              "reasons": [],
+              "measurement_elapsed_ns": 39073975197,
+              "internal_samples": 151,
+              "idle_samples": 148,
+              "failed_queries": 0,
+              "completed": 8,
+              "window": {
+                "first": {
+                  "line": 76,
+                  "started_at": "2026-10-14T05:46:32.849017+00:00",
+                  "finished_at": "2026-10-14T05:46:32.850811+00:00"
+                },
+                "last": {
+                  "line": 226,
+                  "started_at": "2026-10-14T05:47:11.722770+00:00",
+                  "finished_at": "2026-10-14T05:47:11.724170+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 46064320,
+                "end": 259431560,
+                "delta": 213367240,
+                "mean_ns": 26670905.0
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 160435816,
+                "end": 1036887929,
+                "delta": 876452113,
+                "mean_ns": 109556514.125
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28244963,
+                "end": 189626492,
+                "delta": 161381529,
+                "mean_ns": 20172691.125
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4,
+                "end": 12,
+                "delta": 8
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 37864036,
+                "end": 202839013,
+                "delta": 164974977
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 19892750,
+                "end": 25045426,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 388,
+                "end": 2332,
+                "delta": 1944
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 25258117,
+                "end": 152369461,
+                "delta": 127111344
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 25258117,
+                "end": 152369461,
+                "delta": 127111344
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 130170,
+                "end": 3071043,
+                "delta": 2940873
+              }
+            },
+            "capture_hold_mean_ns": 20621872.125,
+            "warnings": [],
+            "errors": []
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 80,
+        "delete_ratio": 0,
+        "value_size": 128,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "binary_verification": "copies_verified",
+      "binary_sha256": {
+        "engine": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "errors": [],
+      "warnings": [],
+      "runs": [
+        {
+          "name": "r01-throughput-snapshot-off",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "client": {
+            "status": "valid",
+            "qps_successful": 29164.220532130126,
+            "p99_ms": 2.759141,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "insufficient",
+              "reasons": [
+                "Completed snapshots are below min_completed."
+              ],
+              "measurement_elapsed_ns": 34288589983,
+              "internal_samples": 132,
+              "idle_samples": 132,
+              "failed_queries": 0,
+              "completed": 0,
+              "window": {
+                "first": {
+                  "line": 78,
+                  "started_at": "2026-10-14T05:47:31.794406+00:00",
+                  "finished_at": "2026-10-14T05:47:31.796467+00:00"
+                },
+                "last": {
+                  "line": 209,
+                  "started_at": "2026-10-14T05:48:05.784042+00:00",
+                  "finished_at": "2026-10-14T05:48:05.785331+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1390,
+                "end": 1390,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4917776,
+                "end": 4917776,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4934663,
+                "end": 4934663,
+                "delta": 0,
+                "mean_ns": null
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 137,
+                "end": 137,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 137,
+                "end": 137,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24,
+                "end": 24,
+                "delta": 0
+              }
+            },
+            "capture_hold_mean_ns": null,
+            "warnings": [],
+            "errors": []
+          }
+        },
+        {
+          "name": "r01-throughput-snapshot-on",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "client": {
+            "status": "valid",
+            "qps_successful": 29284.2940000072,
+            "p99_ms": 2.701131,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "sufficient",
+              "reasons": [],
+              "measurement_elapsed_ns": 34147997558,
+              "internal_samples": 131,
+              "idle_samples": 129,
+              "failed_queries": 0,
+              "completed": 6,
+              "window": {
+                "first": {
+                  "line": 82,
+                  "started_at": "2026-10-14T05:48:26.773295+00:00",
+                  "finished_at": "2026-10-14T05:48:26.775652+00:00"
+                },
+                "last": {
+                  "line": 212,
+                  "started_at": "2026-10-14T05:49:00.532321+00:00",
+                  "finished_at": "2026-10-14T05:49:00.534562+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 68010735,
+                "end": 257219519,
+                "delta": 189208784,
+                "mean_ns": 31534797.333333332
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 233587502,
+                "end": 885659341,
+                "delta": 652071839,
+                "mean_ns": 108678639.83333333
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 43723340,
+                "end": 159853035,
+                "delta": 116129695,
+                "mean_ns": 19354949.166666668
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 5,
+                "end": 11,
+                "delta": 6
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 54543196,
+                "end": 176569775,
+                "delta": 122026579
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 20880561,
+                "end": 25592797,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 606,
+                "end": 2064,
+                "delta": 1458
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 39537160,
+                "end": 134870668,
+                "delta": 95333508
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 39537160,
+                "end": 134870668,
+                "delta": 95333508
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 222111,
+                "end": 2462415,
+                "delta": 2240304
+              }
+            },
+            "capture_hold_mean_ns": 20337763.166666668,
+            "warnings": [],
+            "errors": []
+          }
+        }
+      ]
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A",
+      "arguments": {
+        "output": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A",
+        "engine": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+        "gateway": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+        "bench": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+        "modes": [
+          "throughput"
+        ],
+        "repeats": 1,
+        "requests": 1000000,
+        "workers": 40,
+        "keyspace": 100000,
+        "op": "mixed",
+        "write_ratio": 80,
+        "delete_ratio": 0,
+        "value_size": 128,
+        "seed": 1,
+        "engine_workers": 20,
+        "rpc_pool": 64,
+        "gomaxprocs": 4,
+        "wal_batch": 64,
+        "wal_flush_ms": 2,
+        "snapshot_ms": 5000,
+        "sample_ms": 100,
+        "stats_ms": 250,
+        "run_timeout": 180.0,
+        "startup_timeout": 10.0,
+        "shutdown_timeout": 60.0,
+        "settle_timeout": 60.0
+      },
+      "binary_verification": "copies_verified",
+      "binary_sha256": {
+        "engine": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+        "gateway": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+        "bench": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+      },
+      "counts": {
+        "planned": 2,
+        "valid": 2,
+        "degraded": 0,
+        "failed": 0,
+        "interrupted": 0,
+        "missing": 0,
+        "incomplete": 0,
+        "invalid": 0,
+        "unfinished": 0,
+        "snapshot_evidence_insufficient": 0
+      },
+      "errors": [],
+      "warnings": [],
+      "runs": [
+        {
+          "name": "r01-throughput-snapshot-off",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 0,
+          "client": {
+            "status": "valid",
+            "qps_successful": 29947.091179699546,
+            "p99_ms": 2.568724,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "insufficient",
+              "reasons": [
+                "Completed snapshots are below min_completed."
+              ],
+              "measurement_elapsed_ns": 33392224774,
+              "internal_samples": 129,
+              "idle_samples": 129,
+              "failed_queries": 0,
+              "completed": 0,
+              "window": {
+                "first": {
+                  "line": 77,
+                  "started_at": "2026-10-14T05:49:20.427916+00:00",
+                  "finished_at": "2026-10-14T05:49:20.429706+00:00"
+                },
+                "last": {
+                  "line": 205,
+                  "started_at": "2026-10-14T05:49:53.675870+00:00",
+                  "finished_at": "2026-10-14T05:49:53.678669+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1807,
+                "end": 1807,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4961487,
+                "end": 4961487,
+                "delta": 0,
+                "mean_ns": null
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4521613,
+                "end": 4521613,
+                "delta": 0,
+                "mean_ns": null
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 409,
+                "end": 409,
+                "delta": 0
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 409,
+                "end": 409,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 1,
+                "end": 1,
+                "delta": 0
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28,
+                "end": 28,
+                "delta": 0
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24,
+                "end": 24,
+                "delta": 0
+              }
+            },
+            "capture_hold_mean_ns": null,
+            "warnings": [],
+            "errors": []
+          }
+        },
+        {
+          "name": "r01-throughput-snapshot-on",
+          "wal_mode": "throughput",
+          "snapshot_interval_ms": 5000,
+          "client": {
+            "status": "valid",
+            "qps_successful": 29931.587601021565,
+            "p99_ms": 2.53186,
+            "errors": [],
+            "warnings": []
+          },
+          "snapshot": {
+            "status": "valid",
+            "coverage": {
+              "status": "sufficient",
+              "reasons": [],
+              "measurement_elapsed_ns": 33409520849,
+              "internal_samples": 128,
+              "idle_samples": 124,
+              "failed_queries": 0,
+              "completed": 7,
+              "window": {
+                "first": {
+                  "line": 79,
+                  "started_at": "2026-10-14T05:50:13.787460+00:00",
+                  "finished_at": "2026-10-14T05:50:13.788683+00:00"
+                },
+                "last": {
+                  "line": 206,
+                  "started_at": "2026-10-14T05:50:46.807662+00:00",
+                  "finished_at": "2026-10-14T05:50:46.810120+00:00"
+                },
+                "trimmed_head_samples": 0,
+                "trimmed_tail_samples": 0
+              }
+            },
+            "phases": {
+              "capture": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 60899285,
+                "end": 299036362,
+                "delta": 238137077,
+                "mean_ns": 34019582.428571425
+              },
+              "write": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 152186475,
+                "end": 870403485,
+                "delta": 718217010,
+                "mean_ns": 102602430.0
+              },
+              "compact": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 28479081,
+                "end": 171181198,
+                "delta": 142702117,
+                "mean_ns": 20386016.714285713
+              }
+            },
+            "accounting": {
+              "snapshot_capture_state_lock_acquisitions_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 4,
+                "end": 11,
+                "delta": 7
+              },
+              "snapshot_capture_state_lock_duration_ns_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 53642781,
+                "end": 258516467,
+                "delta": 204873686
+              },
+              "snapshot_capture_state_lock_duration_ns_max": {
+                "availability": "available",
+                "reason": null,
+                "kind": "lifetime_max",
+                "start": 25698172,
+                "end": 33959647,
+                "delta": null
+              },
+              "snapshot_file_write_calls_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 377,
+                "end": 2078,
+                "delta": 1701
+              },
+              "snapshot_file_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24465820,
+                "end": 135688246,
+                "delta": 111222426
+              },
+              "snapshot_file_installed_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 24465820,
+                "end": 135688246,
+                "delta": 111222426
+              },
+              "snapshot_compact_written_bytes_total": {
+                "availability": "available",
+                "reason": null,
+                "kind": "counter",
+                "start": 128540,
+                "end": 2953114,
+                "delta": 2824574
+              }
+            },
+            "capture_hold_mean_ns": 29267669.42857143,
+            "warnings": [],
+            "errors": []
+          }
+        }
+      ]
+    }
+  ]
+}

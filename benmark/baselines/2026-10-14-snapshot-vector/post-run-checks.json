@@ -1,0 +1,3780 @@
+{
+  "schema_version": 1,
+  "status": "pass",
+  "started_at": "2026-10-14T06:15:14.958508+00:00",
+  "execution_root": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5",
+  "script_sha256": "8b7aa309bd91b270696abe8019cceefac61f3a3453685286ef249e22fe242d6c",
+  "scope": "Checks establish observations at the recorded location/time only. Retained database directories are omitted from repository archives; archive-only checkouts cannot rerun these storage checks. Data contents/inode/mode/mtime/ctime are compared; read-access times are excluded. Process absence is a current PID/starttime observation, not a historical boot identity proof.",
+  "plan": {
+    "sha256": "c54dd44fe05027fb78a18c614c93e52a9a2a13c3206426b2b40aa53c01045de4",
+    "declared_sha256": "c54dd44fe05027fb78a18c614c93e52a9a2a13c3206426b2b40aa53c01045de4",
+    "execution_sha256": "c54dd44fe05027fb78a18c614c93e52a9a2a13c3206426b2b40aa53c01045de4",
+    "execution_status": "complete",
+    "execution_json_sha256": "41309e67b85186aa7dae3d5f4f8d9110a8f4cc129a17e9916907f592206295db"
+  },
+  "frozen_files": [
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+      "expected_sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "matches": true,
+      "sha256_after_checks": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+      "expected_sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "matches": true,
+      "sha256_after_checks": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    },
+    {
+      "path": "/mnt/nvme/MiniKV/benmark/experiment.py",
+      "recorded_path": "/mnt/nvme/MiniKV/benmark/experiment.py",
+      "expected_sha256": "0be694985b46810ecd98703bbecb918bbb2a9d98ea3f87abc3e6786fed1f763d",
+      "sha256": "0be694985b46810ecd98703bbecb918bbb2a9d98ea3f87abc3e6786fed1f763d",
+      "matches": true,
+      "sha256_after_checks": "0be694985b46810ecd98703bbecb918bbb2a9d98ea3f87abc3e6786fed1f763d"
+    },
+    {
+      "path": "/mnt/nvme/MiniKV/benmark/experiment_support.py",
+      "recorded_path": "/mnt/nvme/MiniKV/benmark/experiment_support.py",
+      "expected_sha256": "4a99a96526f934bd2521f545d09bce439e053d9dcf6de8297d570b38d198c0fe",
+      "sha256": "4a99a96526f934bd2521f545d09bce439e053d9dcf6de8297d570b38d198c0fe",
+      "matches": true,
+      "sha256_after_checks": "4a99a96526f934bd2521f545d09bce439e053d9dcf6de8297d570b38d198c0fe"
+    },
+    {
+      "path": "/mnt/nvme/MiniKV/benmark/summarize.py",
+      "recorded_path": "/mnt/nvme/MiniKV/benmark/summarize.py",
+      "expected_sha256": "aab09c5ec018c1e294874473c16516ce366daca1506eb869e310296a6929994f",
+      "sha256": "aab09c5ec018c1e294874473c16516ce366daca1506eb869e310296a6929994f",
+      "matches": true,
+      "sha256_after_checks": "aab09c5ec018c1e294874473c16516ce366daca1506eb869e310296a6929994f"
+    },
+    {
+      "path": "/mnt/nvme/MiniKV/benmark/snapshot_report.py",
+      "recorded_path": "/mnt/nvme/MiniKV/benmark/snapshot_report.py",
+      "expected_sha256": "922944a0668a2ba42ef3407086f252d0b3bae109cdf03a5566f467cf6a8d6f7d",
+      "sha256": "922944a0668a2ba42ef3407086f252d0b3bae109cdf03a5566f467cf6a8d6f7d",
+      "matches": true,
+      "sha256_after_checks": "922944a0668a2ba42ef3407086f252d0b3bae109cdf03a5566f467cf6a8d6f7d"
+    },
+    {
+      "path": "/mnt/nvme/MiniKV/benmark/process_guard.py",
+      "recorded_path": "/mnt/nvme/MiniKV/benmark/process_guard.py",
+      "expected_sha256": "92c5bbc531d21dd5dbcea767d9081a808ca588d239a87c4ba302f08d94e4b692",
+      "sha256": "92c5bbc531d21dd5dbcea767d9081a808ca588d239a87c4ba302f08d94e4b692",
+      "matches": true,
+      "sha256_after_checks": "92c5bbc531d21dd5dbcea767d9081a808ca588d239a87c4ba302f08d94e4b692"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/run_plan.py",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/run_plan.py",
+      "expected_sha256": "e7540cadba1f75f80527a330923bca9381b32794049c9e760814003cc24af60a",
+      "sha256": "e7540cadba1f75f80527a330923bca9381b32794049c9e760814003cc24af60a",
+      "matches": true,
+      "sha256_after_checks": "e7540cadba1f75f80527a330923bca9381b32794049c9e760814003cc24af60a"
+    }
+  ],
+  "stage_binary_copies": [
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/binaries/engine",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/binaries/engine",
+      "expected_sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "matches": true,
+      "stage": "primary-01-A",
+      "role": "engine",
+      "sha256_after_checks": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/binaries/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/binaries/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "stage": "primary-01-A",
+      "role": "gateway",
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/binaries/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/binaries/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "stage": "primary-01-A",
+      "role": "bench",
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/binaries/engine",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/binaries/engine",
+      "expected_sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "matches": true,
+      "stage": "primary-02-B",
+      "role": "engine",
+      "sha256_after_checks": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/binaries/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/binaries/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "stage": "primary-02-B",
+      "role": "gateway",
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/binaries/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/binaries/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "stage": "primary-02-B",
+      "role": "bench",
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/binaries/engine",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/binaries/engine",
+      "expected_sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "matches": true,
+      "stage": "primary-03-B",
+      "role": "engine",
+      "sha256_after_checks": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/binaries/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/binaries/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "stage": "primary-03-B",
+      "role": "gateway",
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/binaries/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/binaries/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "stage": "primary-03-B",
+      "role": "bench",
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/binaries/engine",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/binaries/engine",
+      "expected_sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "matches": true,
+      "stage": "primary-04-A",
+      "role": "engine",
+      "sha256_after_checks": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/binaries/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/binaries/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "stage": "primary-04-A",
+      "role": "gateway",
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/binaries/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/binaries/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "stage": "primary-04-A",
+      "role": "bench",
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/binaries/engine",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/binaries/engine",
+      "expected_sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "matches": true,
+      "stage": "stress-01-A",
+      "role": "engine",
+      "sha256_after_checks": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/binaries/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/binaries/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "stage": "stress-01-A",
+      "role": "gateway",
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/binaries/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/binaries/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "stage": "stress-01-A",
+      "role": "bench",
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/binaries/engine",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/binaries/engine",
+      "expected_sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "matches": true,
+      "stage": "stress-02-B",
+      "role": "engine",
+      "sha256_after_checks": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/binaries/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/binaries/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "stage": "stress-02-B",
+      "role": "gateway",
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/binaries/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/binaries/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "stage": "stress-02-B",
+      "role": "bench",
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/binaries/engine",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/binaries/engine",
+      "expected_sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "sha256": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118",
+      "matches": true,
+      "stage": "stress-03-B",
+      "role": "engine",
+      "sha256_after_checks": "109a67650c72b49a501afa0c5e65b3740b2df632b794b96e1d7eb69b5ff04118"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/binaries/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/binaries/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "stage": "stress-03-B",
+      "role": "gateway",
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/binaries/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/binaries/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "stage": "stress-03-B",
+      "role": "bench",
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/binaries/engine",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/binaries/engine",
+      "expected_sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "sha256": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42",
+      "matches": true,
+      "stage": "stress-04-A",
+      "role": "engine",
+      "sha256_after_checks": "c393a142ef0941dce4edde1a291dbec7e31050c3c0ab0f81bf3b0928c6577b42"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/binaries/gateway",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/binaries/gateway",
+      "expected_sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "sha256": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc",
+      "matches": true,
+      "stage": "stress-04-A",
+      "role": "gateway",
+      "sha256_after_checks": "8ed443b408269a6a485df0360384b8065e1649e6915996295f5210309448d3fc"
+    },
+    {
+      "path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/binaries/bench",
+      "recorded_path": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/binaries/bench",
+      "expected_sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "sha256": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216",
+      "matches": true,
+      "stage": "stress-04-A",
+      "role": "bench",
+      "sha256_after_checks": "dd9f06fe353275cf247df71e8a5f306cbc00a007f1779151c4fcf09338ccb216"
+    }
+  ],
+  "stages": [
+    {
+      "name": "primary-01-A",
+      "version": "A",
+      "scenario": "primary",
+      "collector_exit_code": 0,
+      "manifest_sha256": "000202f80b748ca599c6526bbf725af4e13660dae4c0a4ddc201c463e8d6e018",
+      "index_sha256": "75a3c353809e115641c29d88cfef3188b8b7cdf1506c886b502f6cc4b54b62aa"
+    },
+    {
+      "name": "primary-02-B",
+      "version": "B",
+      "scenario": "primary",
+      "collector_exit_code": 0,
+      "manifest_sha256": "12639a01f24b21d5c5c66b9aa91116dd1d9eb7d0503cccd5d32f149ddaf19ac3",
+      "index_sha256": "9a3a9d34394e9e83a01f3c2911ae3a27fdbad664d03ce2bed9233e797fe4037d"
+    },
+    {
+      "name": "primary-03-B",
+      "version": "B",
+      "scenario": "primary",
+      "collector_exit_code": 0,
+      "manifest_sha256": "7fed54868ff8471bd28627fdc3f24a2b3889af8df89f65f64394167573621bd6",
+      "index_sha256": "775f72ca0a29269a23fec558c5165fd0bc324c30c230da46e97c67e2ced2eedc"
+    },
+    {
+      "name": "primary-04-A",
+      "version": "A",
+      "scenario": "primary",
+      "collector_exit_code": 0,
+      "manifest_sha256": "6324e73f058723631b892da780a9e11eacf09cc166448d40e17b56c69bacde31",
+      "index_sha256": "55d1fea760044581f6a1ccc373b1daa6948d749566d38707a0898cb72f18210e"
+    },
+    {
+      "name": "stress-01-A",
+      "version": "A",
+      "scenario": "stress",
+      "collector_exit_code": 0,
+      "manifest_sha256": "5a2c0380584e6b0994bf8e77085dfc5b124c6ab1b9ccd72380bd7b82c36bac44",
+      "index_sha256": "fe0e7f4123aec51fbb181b7c991f4faa5e04d87f21ab28361ed7965f42865516"
+    },
+    {
+      "name": "stress-02-B",
+      "version": "B",
+      "scenario": "stress",
+      "collector_exit_code": 0,
+      "manifest_sha256": "d6c2c8947fc97e2d14e83b84a7742a6fef7c6bfc5235c13da60da3fba5d60bcc",
+      "index_sha256": "dbda568d23f9891d524143c06ce09787e4088245a612337a4b221888387642b6"
+    },
+    {
+      "name": "stress-03-B",
+      "version": "B",
+      "scenario": "stress",
+      "collector_exit_code": 0,
+      "manifest_sha256": "a7e93e1cb1016fdd955ee0b2b4ed4b21bc2804fa27156c1867cbf68a76ba0e45",
+      "index_sha256": "88be70951de4f2191b4dfe6b3d76de17a1a12482ef347285736a67933570581b"
+    },
+    {
+      "name": "stress-04-A",
+      "version": "A",
+      "scenario": "stress",
+      "collector_exit_code": 0,
+      "manifest_sha256": "f5a6134f155be68dc9484627f455cd258aed67e6be0621b34ccfe45164df7315",
+      "index_sha256": "eb2414a455342324f2bd08c599b0c54f6350f6cd42ca8e068798db34352ffced"
+    }
+  ],
+  "cases": [
+    {
+      "name": "primary-01-A/r01-throughput-snapshot-off",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:16.545465+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":318504197,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:18.097792+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 318504197,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:18.097932+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":318504197,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:19.665165+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 318504197,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "e150599f3966211407227d9bccd219ce9daf4c4ebefe673dff9b08d5d4095b3d",
+        "report.json": "90daf4f5ce140d364037e4fc78490b4635f350bd841d060f029403ec9346b490",
+        "stats-settled.json": "9a9d3efa1b4f488160d3407498d2970ad00bade58cdd4a6e0e4425fb496cbc41",
+        "commands.json": "68bc265c605b6b1c077ac61e8661300cb922f30a0d689c2f0b066d557b29faac",
+        "resources.jsonl": "f4a6e7bc9d790597f41eb391d74ec0e63d9949670eba75b4ec7c8455bf095a7a"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 200791,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791,
+        "durable_sequence": 300791,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2488577,
+          "starttime_ticks": 326031471,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2488600,
+          "starttime_ticks": 326031479,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2488607,
+          "starttime_ticks": 326031482,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 996859,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956073440073900,
+          "ctime_ns": 1791956073440073900
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 996864,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956073388078100,
+            "ctime_ns": 1791956073388078100,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 996866,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956073433074500,
+            "ctime_ns": 1791956073436074200,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 996867,
+            "mode": 33152,
+            "size": 318504197,
+            "mtime_ns": 1791956128265656800,
+            "ctime_ns": 1791956128265656800,
+            "sha256": "1c5db1d32c5facb7774ce9adb5786e9c025a1b64ecc37bf543db942c686ea410"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 996859,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956073440073900,
+          "ctime_ns": 1791956073440073900
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 996864,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956073388078100,
+            "ctime_ns": 1791956073388078100,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 996866,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956073433074500,
+            "ctime_ns": 1791956073436074200,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 996867,
+            "mode": 33152,
+            "size": 318504197,
+            "mtime_ns": 1791956128265656800,
+            "ctime_ns": 1791956128265656800,
+            "sha256": "1c5db1d32c5facb7774ce9adb5786e9c025a1b64ecc37bf543db942c686ea410"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "primary-01-A/r01-throughput-snapshot-on",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:20.986075+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":279671,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":22363823,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:21.644529+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 279671,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 22363823,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-01-A/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:21.644679+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":279671,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":22363823,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:22.298545+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 279671,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 22363823,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "0b5bae24ac885c99d268cc017ea897029402bc7af8190c1db2d18e5ca634c068",
+        "report.json": "6a81f07b6044a9c8d2774127bb39058a807beac38bda06b2164a086ced84174e",
+        "stats-settled.json": "1d34840686fce01e66392dfaa7f56f7a3eea98850152005f91ab103a06205bab",
+        "commands.json": "d7608380ea880e753fc21028f254f5838460d8432a89956ddbea17940692368b",
+        "resources.jsonl": "300c27d4e6376179adad5f6b236bef387be47a9da136cdc8e711a857a88c3f47"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 200791,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791,
+        "durable_sequence": 300791,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2489109,
+          "starttime_ticks": 326036985,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2489133,
+          "starttime_ticks": 326036989,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2489140,
+          "starttime_ticks": 326036991,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 996903,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956183495210700,
+          "ctime_ns": 1791956183495210700
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 996908,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956128531635400,
+            "ctime_ns": 1791956128531635400,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 996950,
+            "mode": 33152,
+            "size": 105488918,
+            "mtime_ns": 1791956183376220300,
+            "ctime_ns": 1791956183460213500,
+            "sha256": "1452f31564a00843f3cc57c94790579954e162e51069a4f440d9efcd6427e318"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 996951,
+            "mode": 33152,
+            "size": 22363823,
+            "mtime_ns": 1791956187222910700,
+            "ctime_ns": 1791956187222910700,
+            "sha256": "a851e49ad9cc609bcb56ce733f89de73ece708cf2107929de3fbc41b60cf4669"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 996903,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956183495210700,
+          "ctime_ns": 1791956183495210700
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 996908,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956128531635400,
+            "ctime_ns": 1791956128531635400,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 996950,
+            "mode": 33152,
+            "size": 105488918,
+            "mtime_ns": 1791956183376220300,
+            "ctime_ns": 1791956183460213500,
+            "sha256": "1452f31564a00843f3cc57c94790579954e162e51069a4f440d9efcd6427e318"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 996951,
+            "mode": 33152,
+            "size": 22363823,
+            "mtime_ns": 1791956187222910700,
+            "ctime_ns": 1791956187222910700,
+            "sha256": "a851e49ad9cc609bcb56ce733f89de73ece708cf2107929de3fbc41b60cf4669"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "primary-02-B/r01-throughput-snapshot-off",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:23.996507+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":318504197,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:25.621683+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 318504197,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:25.621831+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":318504197,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:27.423029+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 318504197,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "7712bc4d33d6824354ff4b11917d3882475c64890feb743eedf40e30f5cb2af6",
+        "report.json": "9d30bb0ada134a6eec057e2d6d75e417c4597c9b310247351c3d562bac281db0",
+        "stats-settled.json": "748092ee4e4536dc2d73b7a023bd56df541a5cff3f1130ecdd7792b8b93e103e",
+        "commands.json": "b7c5d652a61f2a21401948d994e500864f2e5a24dd42d13d72dbde99165a147f",
+        "resources.jsonl": "425f1c5a2db24c3c6385c254dc837eec1d6235581993185506668f535bbb0ad1"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 200791,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791,
+        "durable_sequence": 300791,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2489795,
+          "starttime_ticks": 326042904,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2489818,
+          "starttime_ticks": 326042908,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2489825,
+          "starttime_ticks": 326042911,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 996971,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956187729869900,
+          "ctime_ns": 1791956187729869900
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 996976,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956187716871000,
+            "ctime_ns": 1791956187716871000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 996978,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956187722870500,
+            "ctime_ns": 1791956187724870300,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 996979,
+            "mode": 33152,
+            "size": 318504197,
+            "mtime_ns": 1791956248151009900,
+            "ctime_ns": 1791956248151009900,
+            "sha256": "ec2a3f7d0332a057bb1dbf00c1cbb219dec4b765b682e2514baf660589707331"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 996971,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956187729869900,
+          "ctime_ns": 1791956187729869900
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 996976,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956187716871000,
+            "ctime_ns": 1791956187716871000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 996978,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956187722870500,
+            "ctime_ns": 1791956187724870300,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 996979,
+            "mode": 33152,
+            "size": 318504197,
+            "mtime_ns": 1791956248151009900,
+            "ctime_ns": 1791956248151009900,
+            "sha256": "ec2a3f7d0332a057bb1dbf00c1cbb219dec4b765b682e2514baf660589707331"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "primary-02-B/r01-throughput-snapshot-on",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:28.766553+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":292978,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":8273119,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:29.453080+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 292978,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 8273119,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-02-B/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:29.453309+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":292978,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":8273119,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:30.143572+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 292978,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 8273119,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "af08c9d8945821851751ecc9b7ae943cdb303c66528cb53b1a8866ba013a62c0",
+        "report.json": "11fd5e3aecf0d76e422deec7c92e7087a1a2bfc4974191616c9992175daa6576",
+        "stats-settled.json": "5909849b130606a048a141ebbda215336c3016e7534b9c9679651be21ecac969",
+        "commands.json": "1db3b79be5376cbbd690d033ebd7f4d62a381f47c3d00d371d0efe9b0b36a538",
+        "resources.jsonl": "33003606f715072f708830d01cb1bbe7f23c5e6dc569d2db991b60c832f87d51"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 200791,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791,
+        "durable_sequence": 300791,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2490440,
+          "starttime_ticks": 326048976,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2490464,
+          "starttime_ticks": 326048980,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2490471,
+          "starttime_ticks": 326048982,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997007,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956309257098200,
+          "ctime_ns": 1791956309257098200
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997012,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956248437986800,
+            "ctime_ns": 1791956248437986800,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997044,
+            "mode": 33152,
+            "size": 105488918,
+            "mtime_ns": 1791956309138107700,
+            "ctime_ns": 1791956309220101100,
+            "sha256": "3b82fbd668f5624077f9611b70d0d366a9cdfccf3c09e6ff21c88204fc6a8f63"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997045,
+            "mode": 33152,
+            "size": 8273119,
+            "mtime_ns": 1791956310495998600,
+            "ctime_ns": 1791956310495998600,
+            "sha256": "2d4dd4c875eb2fd2561fa4942578321d43999ee02d207529037338a9a6fa1ad7"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997007,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956309257098200,
+          "ctime_ns": 1791956309257098200
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997012,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956248437986800,
+            "ctime_ns": 1791956248437986800,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997044,
+            "mode": 33152,
+            "size": 105488918,
+            "mtime_ns": 1791956309138107700,
+            "ctime_ns": 1791956309220101100,
+            "sha256": "3b82fbd668f5624077f9611b70d0d366a9cdfccf3c09e6ff21c88204fc6a8f63"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997045,
+            "mode": 33152,
+            "size": 8273119,
+            "mtime_ns": 1791956310495998600,
+            "ctime_ns": 1791956310495998600,
+            "sha256": "2d4dd4c875eb2fd2561fa4942578321d43999ee02d207529037338a9a6fa1ad7"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "primary-03-B/r01-throughput-snapshot-off",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:31.733452+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":318504197,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:33.181950+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 318504197,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:33.182097+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":318504197,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:34.654354+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 318504197,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "fd011f9dda9c71163dc7221bd1c9926b950fd11f84ce32b523719d08b05dada4",
+        "report.json": "b6d1444c270965e5d7cc45994fc01efa5e9b03883419bbffc35c6c6f92f4720e",
+        "stats-settled.json": "0c571b8953caf6998a4990e9a3f1d7afdf3ef819acfb2a74cc274cb14de6e1bd",
+        "commands.json": "1acd02165e8ed7b4a1a74ac8244fedf154a99151834863e5b22fb8b3337eb294",
+        "resources.jsonl": "7d1904a04967172775366cd6067cd837e307a676b6e3c05bb0e90882081d23bf"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 200791,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791,
+        "durable_sequence": 300791,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2491044,
+          "starttime_ticks": 326055242,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2491067,
+          "starttime_ticks": 326055247,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2491074,
+          "starttime_ticks": 326055249,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997066,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956311118948600,
+          "ctime_ns": 1791956311118948600
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997071,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956311100950000,
+            "ctime_ns": 1791956311100950000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997073,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956311106949500,
+            "ctime_ns": 1791956311108949400,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997074,
+            "mode": 33152,
+            "size": 318504197,
+            "mtime_ns": 1791956374227879200,
+            "ctime_ns": 1791956374227879200,
+            "sha256": "1c65d145a9baaebbd84ffbe7f02bb628eb26d978cd748b53e35ca0b4141d1133"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997066,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956311118948600,
+          "ctime_ns": 1791956311118948600
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997071,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956311100950000,
+            "ctime_ns": 1791956311100950000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997073,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956311106949500,
+            "ctime_ns": 1791956311108949400,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997074,
+            "mode": 33152,
+            "size": 318504197,
+            "mtime_ns": 1791956374227879200,
+            "ctime_ns": 1791956374227879200,
+            "sha256": "1c65d145a9baaebbd84ffbe7f02bb628eb26d978cd748b53e35ca0b4141d1133"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "primary-03-B/r01-throughput-snapshot-on",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:35.825862+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":298846,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":2059569,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:36.345872+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 298846,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 2059569,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-03-B/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:36.346021+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":298846,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":2059569,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:36.898455+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 298846,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 2059569,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "f4ebeb69157facf930da966773b4cf842915f2950e97746b53ab1d0d06926e5f",
+        "report.json": "e00d8bd27de3f8b7dd508b8ce6aff5ea19e9db5763573183125487edb5244378",
+        "stats-settled.json": "35888e6c93253f86a38b5ddd81cd73d4c7b1d99040da58c5a35f786b5eef5507",
+        "commands.json": "9e2a16c19117dae8bb00542cf17574832983a25a15d2f5d48ab19e4306f7cf96",
+        "resources.jsonl": "2ceda1d0831f4e1de3cd66012b80fdb1cc1ab7ade662238132fb61c9a0a52a67"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 200791,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791,
+        "durable_sequence": 300791,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2491720,
+          "starttime_ticks": 326061583,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2491744,
+          "starttime_ticks": 326061587,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2491751,
+          "starttime_ticks": 326061589,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997089,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956441221501000,
+          "ctime_ns": 1791956441221501000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997094,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956374501857200,
+            "ctime_ns": 1791956374501857200,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997128,
+            "mode": 33152,
+            "size": 105488918,
+            "mtime_ns": 1791956441116509400,
+            "ctime_ns": 1791956441199502800,
+            "sha256": "9086479edd8b339ccb48fb5e047ac3cbb52fe128ea1a1f5f65d73de492ce7d80"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997129,
+            "mode": 33152,
+            "size": 2059569,
+            "mtime_ns": 1791956441217501300,
+            "ctime_ns": 1791956441221501000,
+            "sha256": "bf930d7abb9803d9db42de1328f0b55383b7136f99f935a4be60c0a58cebc52f"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997089,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956441221501000,
+          "ctime_ns": 1791956441221501000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997094,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956374501857200,
+            "ctime_ns": 1791956374501857200,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997128,
+            "mode": 33152,
+            "size": 105488918,
+            "mtime_ns": 1791956441116509400,
+            "ctime_ns": 1791956441199502800,
+            "sha256": "9086479edd8b339ccb48fb5e047ac3cbb52fe128ea1a1f5f65d73de492ce7d80"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997129,
+            "mode": 33152,
+            "size": 2059569,
+            "mtime_ns": 1791956441217501300,
+            "ctime_ns": 1791956441221501000,
+            "sha256": "bf930d7abb9803d9db42de1328f0b55383b7136f99f935a4be60c0a58cebc52f"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "primary-04-A/r01-throughput-snapshot-off",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:38.314608+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":318504197,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:39.995116+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 318504197,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:39.995282+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":318504197,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:41.634072+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 318504197,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "6199081b998f29c42e0d6fc86e4aac8c12f14fd0fb8eda2c2a5a7177b0942ef6",
+        "report.json": "a5ead6aadb61e13115d04cf0c828d9c57a016088bd2d9c0eee5f5648d7bf0b19",
+        "stats-settled.json": "ba5270c0c52d5db8832d575773aee73098af161ef15009788ad261d90ab1d8b6",
+        "commands.json": "82d93bc31c028c4961a62132e6b299b05d649d8b63303eebdd2b9055957add09",
+        "resources.jsonl": "06bba60db89795b640c014cfa9be5abc0225c0d327626c1c63353d90ea94e367"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 200791,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791,
+        "durable_sequence": 300791,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2492449,
+          "starttime_ticks": 326068309,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2492472,
+          "starttime_ticks": 326068315,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2492479,
+          "starttime_ticks": 326068320,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997149,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956441799454600,
+          "ctime_ns": 1791956441799454600
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997154,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956441770456900,
+            "ctime_ns": 1791956441770456900,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997156,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956441787455600,
+            "ctime_ns": 1791956441794455000,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997157,
+            "mode": 33152,
+            "size": 318504197,
+            "mtime_ns": 1791956506238284200,
+            "ctime_ns": 1791956506238284200,
+            "sha256": "59ec644513e3e195b2787a6a62146120185d6c1bd9d37ea2a449b5b2aacab876"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997149,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956441799454600,
+          "ctime_ns": 1791956441799454600
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997154,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956441770456900,
+            "ctime_ns": 1791956441770456900,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997156,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956441787455600,
+            "ctime_ns": 1791956441794455000,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997157,
+            "mode": 33152,
+            "size": 318504197,
+            "mtime_ns": 1791956506238284200,
+            "ctime_ns": 1791956506238284200,
+            "sha256": "59ec644513e3e195b2787a6a62146120185d6c1bd9d37ea2a449b5b2aacab876"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "primary-04-A/r01-throughput-snapshot-on",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:42.986609+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":289881,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":11552506,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:44.149336+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 289881,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 11552506,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/primary-04-A/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:44.149508+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":102988890,\"data_capacity_bytes\":0,\"snapshot_sequence\":289881,\"applied_sequence\":300791,\"wal_format\":\"v2\",\"wal_valid_bytes\":11552506,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:44.837562+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 102988890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 289881,
+            "applied_sequence": 300791,
+            "wal_format": "v2",
+            "wal_valid_bytes": 11552506,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "b61bedf7817f3ff79a200b383a7417f5b2ff9d3f9b0f9734034147f494b0ef3e",
+        "report.json": "a1ee6c6112714d266465c0ec1549ed61e906193bcfaf0056a71b5c62a90e5664",
+        "stats-settled.json": "08475a49c5967521d7ffdba4af21db50450c22a34af18707977983d12af99c47",
+        "commands.json": "8a46e13517763ce8f000cc7d78eb94efc1eb65c5c1ccbaf57724ae33634b2e57",
+        "resources.jsonl": "b213fd4e2b8e255d58aec197c7b5cab0bfa27dd23069655ce23749f25d179bd9"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 200791,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 102988890,
+        "applied_sequence": 300791,
+        "durable_sequence": 300791,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2493071,
+          "starttime_ticks": 326074788,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2493095,
+          "starttime_ticks": 326074793,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2493102,
+          "starttime_ticks": 326074797,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997171,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956573435895000,
+          "ctime_ns": 1791956573435895000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997176,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956506557258600,
+            "ctime_ns": 1791956506557258600,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997210,
+            "mode": 33152,
+            "size": 105488918,
+            "mtime_ns": 1791956573319904300,
+            "ctime_ns": 1791956573395898200,
+            "sha256": "e26faca87b7e923e67ac9676f3af473881a79984884983150e8ae4573a3d512d"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997211,
+            "mode": 33152,
+            "size": 11552506,
+            "mtime_ns": 1791956575206753000,
+            "ctime_ns": 1791956575206753000,
+            "sha256": "fa861d1dc495a0ab5e6e709a9ad4b60298e350ef1bd5fe796422b0b5726612a3"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997171,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956573435895000,
+          "ctime_ns": 1791956573435895000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997176,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956506557258600,
+            "ctime_ns": 1791956506557258600,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997210,
+            "mode": 33152,
+            "size": 105488918,
+            "mtime_ns": 1791956573319904300,
+            "ctime_ns": 1791956573395898200,
+            "sha256": "e26faca87b7e923e67ac9676f3af473881a79984884983150e8ae4573a3d512d"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997211,
+            "mode": 33152,
+            "size": 11552506,
+            "mtime_ns": 1791956575206753000,
+            "ctime_ns": 1791956575206753000,
+            "sha256": "fa861d1dc495a0ab5e6e709a9ad4b60298e350ef1bd5fe796422b0b5726612a3"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "stress-01-A/r01-throughput-snapshot-off",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:45.925591+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":146616146,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:48.029479+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 146616146,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:48.029714+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":146616146,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:50.176840+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 146616146,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "770d5aa53643af94190fcda746c303fe8c610e8626991cf6bff10194f8f4f0b3",
+        "report.json": "179bc7c4e41848cc5c0b7d05d4391ed77e80eb6f2d27db0109d26ab759159386",
+        "stats-settled.json": "7e55f8f7a8bdd4db8f0f6a763ab80102b4087eb08e0f10a6e54526e84f3dac3a",
+        "commands.json": "d6fe933912ac316a878ae93ec97c2c3b7ac343eeaaad0ccc2a5c693c63f9de37",
+        "resources.jsonl": "35e2c346f005ae3fe2e6cd81cd519f9814efb089110ed94267fe10dbc6704ba0"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 800098,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098,
+        "durable_sequence": 900098,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2493853,
+          "starttime_ticks": 326081707,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2493876,
+          "starttime_ticks": 326081711,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2493884,
+          "starttime_ticks": 326081713,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997231,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956575754709000,
+          "ctime_ns": 1791956575754709000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997236,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956575742710000,
+            "ctime_ns": 1791956575742710000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997238,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956575747709600,
+            "ctime_ns": 1791956575750709400,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997239,
+            "mode": 33152,
+            "size": 146616146,
+            "mtime_ns": 1791956641368449000,
+            "ctime_ns": 1791956641368449000,
+            "sha256": "832dc67c4ec097a81255200c8b9bdbb67b36d0cb51f9d80fb142bf9f7b775e60"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997231,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956575754709000,
+          "ctime_ns": 1791956575754709000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997236,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956575742710000,
+            "ctime_ns": 1791956575742710000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997238,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956575747709600,
+            "ctime_ns": 1791956575750709400,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997239,
+            "mode": 33152,
+            "size": 146616146,
+            "mtime_ns": 1791956641368449000,
+            "ctime_ns": 1791956641368449000,
+            "sha256": "832dc67c4ec097a81255200c8b9bdbb67b36d0cb51f9d80fb142bf9f7b775e60"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "stress-01-A/r01-throughput-snapshot-on",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:50.640196+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":846684,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":8700662,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:51.038523+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 846684,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 8700662,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-01-A/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:51.038673+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":846684,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":8700662,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:51.426667+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 846684,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 8700662,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "1acb51ed6015220ee3f441ce0ffcbda747266a44127ca493ed6832e466f7c619",
+        "report.json": "2642b5219136cdc491b5bb944fd286ba7f9be270524e2a269521ee36bf465819",
+        "stats-settled.json": "2f3419036fbe98998ac4e3b095f0560bbc48dc7ed28beede9bd4fe53af465561",
+        "commands.json": "9249c764cb6b0e482d38306c015ef7f148635dd1843d1f5f85cd166458b7f14e",
+        "resources.jsonl": "33f47ffb8270a679634317590d897312007612abb5da3f2dc9dcf09ba35c32b7"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 800098,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098,
+        "durable_sequence": 900098,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2494593,
+          "starttime_ticks": 326088303,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2494617,
+          "starttime_ticks": 326088307,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2494624,
+          "starttime_ticks": 326088309,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997253,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956703612460900,
+          "ctime_ns": 1791956703612460900
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997258,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956641705422000,
+            "ctime_ns": 1791956641705422000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997292,
+            "mode": 33152,
+            "size": 15888918,
+            "mtime_ns": 1791956703578463600,
+            "ctime_ns": 1791956703598462000,
+            "sha256": "46b59983393d0cece6fb0728350d340cd2048ff2a13b1f7db0c4555e71d87841"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997293,
+            "mode": 33152,
+            "size": 8700662,
+            "mtime_ns": 1791956707017188100,
+            "ctime_ns": 1791956707017188100,
+            "sha256": "6d36d84dce7e3e16d367b57095d73cdbe49e5b573cca88999923e7f7719caac8"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997253,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956703612460900,
+          "ctime_ns": 1791956703612460900
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997258,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956641705422000,
+            "ctime_ns": 1791956641705422000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997292,
+            "mode": 33152,
+            "size": 15888918,
+            "mtime_ns": 1791956703578463600,
+            "ctime_ns": 1791956703598462000,
+            "sha256": "46b59983393d0cece6fb0728350d340cd2048ff2a13b1f7db0c4555e71d87841"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997293,
+            "mode": 33152,
+            "size": 8700662,
+            "mtime_ns": 1791956707017188100,
+            "ctime_ns": 1791956707017188100,
+            "sha256": "6d36d84dce7e3e16d367b57095d73cdbe49e5b573cca88999923e7f7719caac8"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "stress-02-B/r01-throughput-snapshot-off",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:52.165113+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":146616146,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:54.320251+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 146616146,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:54.320454+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":146616146,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:56.530052+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 146616146,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "2f0554d230c240f12f37224ff37885cce6694a40c3bd2d8b706df7323f0974e5",
+        "report.json": "0933678739dd50ee1b9809844599478e177fbefaa9c7395ae85ef07c558c0045",
+        "stats-settled.json": "f5eab4f88a59cd82658d13ebcc93736abe60e648c3f30103a70bdd684ff1e089",
+        "commands.json": "17c499db88fba9f7cf1c890202b5ac365d199804e44db28c433eb0879749549e",
+        "resources.jsonl": "9da9f0838f637dbc3bedccb0b546a0873b6beab5e98cf1b3e7be5d182a06c004"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 800098,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098,
+        "durable_sequence": 900098,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2495310,
+          "starttime_ticks": 326094897,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2495333,
+          "starttime_ticks": 326094902,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2495340,
+          "starttime_ticks": 326094904,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997313,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956707664136300,
+          "ctime_ns": 1791956707664136300
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997318,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956707652137200,
+            "ctime_ns": 1791956707652137200,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997320,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956707657136800,
+            "ctime_ns": 1791956707660136600,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997321,
+            "mode": 33152,
+            "size": 146616146,
+            "mtime_ns": 1791956773495862300,
+            "ctime_ns": 1791956773495862300,
+            "sha256": "164181a2e386420d48b1e83e85c40bf13df195830ec6b98f62074cb70af3816d"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997313,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956707664136300,
+          "ctime_ns": 1791956707664136300
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997318,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956707652137200,
+            "ctime_ns": 1791956707652137200,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997320,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956707657136800,
+            "ctime_ns": 1791956707660136600,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997321,
+            "mode": 33152,
+            "size": 146616146,
+            "mtime_ns": 1791956773495862300,
+            "ctime_ns": 1791956773495862300,
+            "sha256": "164181a2e386420d48b1e83e85c40bf13df195830ec6b98f62074cb70af3816d"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "stress-02-B/r01-throughput-snapshot-on",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:57.035164+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":865282,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":5671144,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:57.429727+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 865282,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 5671144,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-02-B/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:57.429873+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":865282,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":5671144,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:15:57.837838+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 865282,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 5671144,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "6b5d80cbd43483a9dd5599de38346ea0a08a0831b440317446b438ade8ba54b0",
+        "report.json": "9032a1ce7864500ab3253bb2f54c847a97e4d8295c109e3a9edaad08191a88ee",
+        "stats-settled.json": "8fb657e977ab23f1b6ee78079481460d69a83f17d98a378bf61b4d239d4fc685",
+        "commands.json": "f3b958e8bc4199572305244c70a7d3d4aecc3e1a4e2481742b3fdc9090175506",
+        "resources.jsonl": "cb7d062e0713b349b7f4410dbee108902348ca96be1ac5a3e0e40bf938a82fc8"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 800098,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098,
+        "durable_sequence": 900098,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2495980,
+          "starttime_ticks": 326101514,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2496004,
+          "starttime_ticks": 326101518,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2496012,
+          "starttime_ticks": 326101520,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997335,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956830360307900,
+          "ctime_ns": 1791956830360307900
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997340,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956773816836600,
+            "ctime_ns": 1791956773816836600,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997380,
+            "mode": 33152,
+            "size": 15888918,
+            "mtime_ns": 1791956830307312200,
+            "ctime_ns": 1791956830323310900,
+            "sha256": "86786262b7c476e6316edbcf2341e72e612b0d3d29564a5aa54ef47652761fcd"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997381,
+            "mode": 33152,
+            "size": 5671144,
+            "mtime_ns": 1791956831833190000,
+            "ctime_ns": 1791956831833190000,
+            "sha256": "9271ee50d4ad88d247d33654d764bb75781bd2cce2c911a4d39f390679b93b92"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997335,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956830360307900,
+          "ctime_ns": 1791956830360307900
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997340,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956773816836600,
+            "ctime_ns": 1791956773816836600,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997380,
+            "mode": 33152,
+            "size": 15888918,
+            "mtime_ns": 1791956830307312200,
+            "ctime_ns": 1791956830323310900,
+            "sha256": "86786262b7c476e6316edbcf2341e72e612b0d3d29564a5aa54ef47652761fcd"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997381,
+            "mode": 33152,
+            "size": 5671144,
+            "mtime_ns": 1791956831833190000,
+            "ctime_ns": 1791956831833190000,
+            "sha256": "9271ee50d4ad88d247d33654d764bb75781bd2cce2c911a4d39f390679b93b92"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "stress-03-B/r01-throughput-snapshot-off",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:15:58.589329+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":146616146,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:16:00.972117+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 146616146,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:16:00.972285+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":146616146,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:16:03.486285+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 146616146,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "f6fd0ebb78a3ecf8ae0978b4091539e63a58c18d7b13dbbd6012e25fd8001f84",
+        "report.json": "2770972ce5634e620bd8a451d21e43b765c30d988510b53571675ed7401644c7",
+        "stats-settled.json": "f67e59b660e43e8bac29e3d244aaf0ae53c4fc154e4830592f079b00db60c646",
+        "commands.json": "0a4eb5302a898634ce796ebfb040a2cd783af8143d5b724ec73718014b3bc23e",
+        "resources.jsonl": "8299638a2576e00f3cef4514be584588363c89cce7103a68a50e2a10a5da9c88"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 800098,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098,
+        "durable_sequence": 900098,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2496646,
+          "starttime_ticks": 326107362,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2496669,
+          "starttime_ticks": 326107367,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2496676,
+          "starttime_ticks": 326107369,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997401,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956832320151000,
+          "ctime_ns": 1791956832320151000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997406,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956832307152000,
+            "ctime_ns": 1791956832307152000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997408,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956832312151600,
+            "ctime_ns": 1791956832315151400,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997409,
+            "mode": 33152,
+            "size": 146616146,
+            "mtime_ns": 1791956886018851100,
+            "ctime_ns": 1791956886018851100,
+            "sha256": "54c45cf574289f2f5e7d1ae14e972662a61d507bccf30a90f4bb5854c1c60346"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997401,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956832320151000,
+          "ctime_ns": 1791956832320151000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997406,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956832307152000,
+            "ctime_ns": 1791956832307152000,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997408,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956832312151600,
+            "ctime_ns": 1791956832315151400,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997409,
+            "mode": 33152,
+            "size": 146616146,
+            "mtime_ns": 1791956886018851100,
+            "ctime_ns": 1791956886018851100,
+            "sha256": "54c45cf574289f2f5e7d1ae14e972662a61d507bccf30a90f4bb5854c1c60346"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "stress-03-B/r01-throughput-snapshot-on",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:16:04.086781+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":826072,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":12058053,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:16:04.650951+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 826072,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 12058053,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-03-B/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:16:04.651109+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":826072,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":12058053,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:16:05.171497+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 826072,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 12058053,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "8293ca015d9d4ac9d5751f226846e2926a87fff93a215512a5da612553f32b5e",
+        "report.json": "11c7585c72fdcfdc737f8fab49f43de5643ae3d558af7c916084dfa26f82141e",
+        "stats-settled.json": "6659c18a72e9126a72e39a4e54cca155cb426ed5ebdf0b2e50294b7f6e0d03d9",
+        "commands.json": "b9720fd8577587f8256486bb4c58d1dcdc195003d42d143b06710a7f48d5ba6c",
+        "resources.jsonl": "a07f9c525678912240068423e077d3cf5ed07fb2e08cbba3f25b5f28adb80e95"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 800098,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098,
+        "durable_sequence": 900098,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2497191,
+          "starttime_ticks": 326112758,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2497215,
+          "starttime_ticks": 326112762,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2497223,
+          "starttime_ticks": 326112764,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997423,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956937601721300,
+          "ctime_ns": 1791956937601721300
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997428,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956886255832100,
+            "ctime_ns": 1791956886255832100,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997458,
+            "mode": 33152,
+            "size": 15888918,
+            "mtime_ns": 1791956937559724700,
+            "ctime_ns": 1791956937580723000,
+            "sha256": "15a3fbe0166429fa33f9e93050e0d7358a8c054f414d52455b8370085f020105"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997459,
+            "mode": 33152,
+            "size": 12058053,
+            "mtime_ns": 1791956940732470700,
+            "ctime_ns": 1791956940732470700,
+            "sha256": "ea48385e0f8fdbdd4ee693f51355626020af8b7e17298f664c129231c98068d8"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997423,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956937601721300,
+          "ctime_ns": 1791956937601721300
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997428,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956886255832100,
+            "ctime_ns": 1791956886255832100,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997458,
+            "mode": 33152,
+            "size": 15888918,
+            "mtime_ns": 1791956937559724700,
+            "ctime_ns": 1791956937580723000,
+            "sha256": "15a3fbe0166429fa33f9e93050e0d7358a8c054f414d52455b8370085f020105"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997459,
+            "mode": 33152,
+            "size": 12058053,
+            "mtime_ns": 1791956940732470700,
+            "ctime_ns": 1791956940732470700,
+            "sha256": "ea48385e0f8fdbdd4ee693f51355626020af8b7e17298f664c129231c98068d8"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "stress-04-A/r01-throughput-snapshot-off",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:16:06.102541+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":146616146,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:16:08.564249+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 146616146,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/r01-throughput-snapshot-off/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:16:08.564424+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":0,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":146616146,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:16:11.122881+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 0,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 146616146,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "a79189d6ae1429d6c16d9e6336c8a8bb80a4159146b13f9c77f0cdb58979857e",
+        "report.json": "3b517acba6b29512c12fa1e332c98b4f6b11789794753cec453db5d07eac769f",
+        "stats-settled.json": "501f1f689931da900992d998ce80dc3ac0f31c10dba808f974e77aa451d02d63",
+        "commands.json": "5962071f48131c22e82cd2416657d93d58a39c969675d1e668d78aa751e54d3e",
+        "resources.jsonl": "74c7e59343178172f5eb4f1074ec4323eb789bc333a9ceb3504f76c84cc421e9"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 800098,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098,
+        "durable_sequence": 900098,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2497756,
+          "starttime_ticks": 326118253,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2497779,
+          "starttime_ticks": 326118257,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2497786,
+          "starttime_ticks": 326118259,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997479,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956941216432000,
+          "ctime_ns": 1791956941216432000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997484,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956941204432900,
+            "ctime_ns": 1791956941204432900,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997486,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956941209432500,
+            "ctime_ns": 1791956941211432400,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997487,
+            "mode": 33152,
+            "size": 146616146,
+            "mtime_ns": 1791956993788983800,
+            "ctime_ns": 1791956993788983800,
+            "sha256": "275f896bb8fd1dfad5c8f78675890bc33e2a4e9eaf97aa19beffb090e52ba4cf"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997479,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791956941216432000,
+          "ctime_ns": 1791956941216432000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997484,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956941204432900,
+            "ctime_ns": 1791956941204432900,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997486,
+            "mode": 33152,
+            "size": 28,
+            "mtime_ns": 1791956941209432500,
+            "ctime_ns": 1791956941211432400,
+            "sha256": "8ba885f70db4202b1a5a33931d3f0d0ec78917120bbb5aabd188a40b44a64aec"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997487,
+            "mode": 33152,
+            "size": 146616146,
+            "mtime_ns": 1791956993788983800,
+            "ctime_ns": 1791956993788983800,
+            "sha256": "275f896bb8fd1dfad5c8f78675890bc33e2a4e9eaf97aa19beffb090e52ba4cf"
+          }
+        }
+      },
+      "data_unchanged": true
+    },
+    {
+      "name": "stress-04-A/r01-throughput-snapshot-on",
+      "status": "pass",
+      "errors": [],
+      "checks": [
+        {
+          "version": "A",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-A",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:16:11.771447+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":862016,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":6203145,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:16:12.208099+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 862016,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 6203145,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        },
+        {
+          "version": "B",
+          "command": [
+            "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/frozen/engine-B",
+            "--check"
+          ],
+          "environment": {
+            "PATH": "/bin:/usr/bin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TZ": "UTC",
+            "MINIKV_DATA_DIR": "/mnt/nvme/minikv-review/snapshot-vector-comparison-05acff5/stress-04-A/r01-throughput-snapshot-on/data",
+            "MINIKV_MAX_DATA_BYTES": "0"
+          },
+          "started_at": "2026-10-14T06:16:12.208299+00:00",
+          "timeout_seconds": 60,
+          "exit_code": 0,
+          "stdout": "{\"schema_version\":1,\"status\":\"valid\",\"keys\":100000,\"data_bytes\":13388890,\"data_capacity_bytes\":0,\"snapshot_sequence\":862016,\"applied_sequence\":900098,\"wal_format\":\"v2\",\"wal_valid_bytes\":6203145,\"wal_trailing_bytes\":0}\n",
+          "stderr": "",
+          "finished_at": "2026-10-14T06:16:12.666502+00:00",
+          "parsed_json": {
+            "schema_version": 1,
+            "status": "valid",
+            "keys": 100000,
+            "data_bytes": 13388890,
+            "data_capacity_bytes": 0,
+            "snapshot_sequence": 862016,
+            "applied_sequence": 900098,
+            "wal_format": "v2",
+            "wal_valid_bytes": 6203145,
+            "wal_trailing_bytes": 0
+          },
+          "valid": true
+        }
+      ],
+      "input_sha256": {
+        "result.json": "c6b26c35cb50a2448816e9ac6ea43a6768c915d2077f6b71414c8f687e605da5",
+        "report.json": "d633bcfb48aed76ae6887c782eb346c132366bb00c8a73fbd288a69c3d4070cd",
+        "stats-settled.json": "0cfb52cc88a7cfd62cb186a3de5b4b3324572a8e2eebe17ac806fbb4cd08510b",
+        "commands.json": "e02451fa81308947fad5bde6300bb64571a409f6359abd47804a294736edb3aa",
+        "resources.jsonl": "06284a66353b5d665f6e21881c9ad491fcf29efbfe3029b24ffc23f1da46b8bb"
+      },
+      "expected": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098
+      },
+      "sequence_inputs": {
+        "preload_completed_keys": 100000,
+        "put": 800098,
+        "delete": 0
+      },
+      "settled": {
+        "keys": 100000,
+        "data_bytes": 13388890,
+        "applied_sequence": 900098,
+        "durable_sequence": 900098,
+        "wal_pending_bytes": 0,
+        "wal_inflight_bytes": 0,
+        "wal_queued_records": 0,
+        "io_failed": false
+      },
+      "processes": {
+        "engine": {
+          "pid": 2498322,
+          "starttime_ticks": 326123538,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "gateway": {
+          "pid": 2498346,
+          "starttime_ticks": 326123542,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        },
+        "bench": {
+          "pid": 2498353,
+          "starttime_ticks": 326123544,
+          "forced": false,
+          "returncode": 0,
+          "normal_exit": true,
+          "current_proc_stat": null,
+          "original_process_absent": true
+        }
+      },
+      "data_before": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997501,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791957045470604000,
+          "ctime_ns": 1791957045470604000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997506,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956994055966500,
+            "ctime_ns": 1791956994055966500,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997536,
+            "mode": 33152,
+            "size": 15888918,
+            "mtime_ns": 1791957045431606600,
+            "ctime_ns": 1791957045445605600,
+            "sha256": "140461176db398d1206db92709edcabacad05c5002a0ec7184b4f25409096858"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997537,
+            "mode": 33152,
+            "size": 6203145,
+            "mtime_ns": 1791957046998503100,
+            "ctime_ns": 1791957046998503100,
+            "sha256": "1e7e7d84320bd92dc19a6b1cabe3b2c3be654195a12eafcca82dc1f455d38384"
+          }
+        }
+      },
+      "data_after": {
+        "directory": {
+          "dev": 66306,
+          "ino": 997501,
+          "mode": 16877,
+          "size": 0,
+          "mtime_ns": 1791957045470604000,
+          "ctime_ns": 1791957045470604000
+        },
+        "files": {
+          "LOCK": {
+            "dev": 66306,
+            "ino": 997506,
+            "mode": 33152,
+            "size": 0,
+            "mtime_ns": 1791956994055966500,
+            "ctime_ns": 1791956994055966500,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "snapshot.v1": {
+            "dev": 66306,
+            "ino": 997536,
+            "mode": 33152,
+            "size": 15888918,
+            "mtime_ns": 1791957045431606600,
+            "ctime_ns": 1791957045445605600,
+            "sha256": "140461176db398d1206db92709edcabacad05c5002a0ec7184b4f25409096858"
+          },
+          "wal.v1": {
+            "dev": 66306,
+            "ino": 997537,
+            "mode": 33152,
+            "size": 6203145,
+            "mtime_ns": 1791957046998503100,
+            "ctime_ns": 1791957046998503100,
+            "sha256": "1e7e7d84320bd92dc19a6b1cabe3b2c3be654195a12eafcca82dc1f455d38384"
+          }
+        }
+      },
+      "data_unchanged": true
+    }
+  ],
+  "errors": [],
+  "counts": {
+    "stages": 8,
+    "cases": 16,
+    "frozen_files": 10,
+    "stage_binary_copies": 24,
+    "storage_checks": 32,
+    "valid_storage_checks": 32,
+    "normal_process_exits": 48,
+    "original_processes_absent": 48,
+    "unchanged_databases": 16
+  },
+  "finished_at": "2026-10-14T06:16:13.690259+00:00"
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "status": "pass",
+  "verified_at": "2026-10-14T06:27:05.616352+00:00",
+  "archive_sha256": "5aeaabee800adc313c1001100cac395de19e59c00c48a684e4932678c10a485a",
+  "manifest_sha256": "74edf4962689c1af793ac82bf3a7b094687bee29e60d8bedfd2658dacaf21537",
+  "verified_files": 220,
+  "verified_raw_bytes": 20093917,
+  "workspace": "/mnt/nvme/minikv-review/snapshot-vector-archive-review-6ero3kpa",
+  "command": [
+    "python3",
+    "/mnt/nvme/MiniKV/benmark/baselines/2026-10-14-snapshot-vector/analyze.py",
+    "/mnt/nvme/minikv-review/snapshot-vector-archive-review-6ero3kpa/snapshot-vector",
+    "--repo",
+    "/mnt/nvme/MiniKV",
+    "--storage-checks",
+    "/mnt/nvme/MiniKV/benmark/baselines/2026-10-14-snapshot-vector/post-run-checks.json",
+    "--output-dir",
+    "/mnt/nvme/minikv-review/snapshot-vector-archive-review-6ero3kpa/derived"
+  ],
+  "analyzer_exit_code": 0,
+  "equal_analysis_fields": [
+    "plan_sha256",
+    "analyzer_sha256",
+    "thresholds",
+    "errors",
+    "case_counts",
+    "pairs",
+    "groups",
+    "threshold_failures",
+    "performance_thresholds_pass",
+    "compact_summary",
+    "adoption"
+  ],
+  "rows": "all fields equal except expected executable-copies-absent warning added to each row; original warnings retained",
+  "case_counts": {
+    "planned": 16,
+    "valid": 16,
+    "invalid_or_insufficient": 0
+  },
+  "threshold_failures": 8,
+  "adoption": "not_adopted",
+  "binary_verification": "recorded_hashes_only",
+  "database_directories_present": 0,
+  "storage_checks": "recorded_historical_checks",
+  "analyzer_reexecuted_storage_checks": false,
+  "historical_storage_check_attachment_sha256": "0a2642b1e17556dccad0b02ad2a8c9b3060dbc3ad33265ec754ecd9fb2b1d603"
+}

@@ -1,0 +1,57 @@
+diff --git a/cpp_engine/engine.cpp b/cpp_engine/engine.cpp
+index 6172efc..d2a73cb 100644
+--- a/cpp_engine/engine.cpp
++++ b/cpp_engine/engine.cpp
+@@ -882,7 +882,7 @@ void Engine::flush_locked() {
+     }
+ }
+ 
+-void Engine::install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence,
++void Engine::install_snapshot(const std::vector<std::pair<std::string, std::string>>& image, uint64_t sequence,
+                               uint64_t& write_calls, uint64_t& written_bytes, uint64_t& installed_bytes) {
+     File file(create_temporary_at(directory_fd_, "snapshot.v1.tmp", O_WRONLY));
+     hook("snapshot.write");
+@@ -972,7 +972,7 @@ void Engine::snapshot() {
+     }
+     try {
+         std::unique_lock<std::mutex> io_lock(io_mutex_, std::defer_lock);
+-        std::unordered_map<std::string, std::string> image;
++        std::vector<std::pair<std::string, std::string>> image;
+         std::deque<PendingRecord> batch;
+         size_t batch_bytes;
+         uint64_t sequence;
+@@ -987,8 +987,10 @@ void Engine::snapshot() {
+                                              stats_.snapshot_capture_state_lock_duration_ns_max};
+                 if (stopping_) throw std::runtime_error("engine is stopping");
+                 if (!failure_.empty()) throw std::runtime_error(failure_);
+-                // Copy before detaching: an allocation failure leaves the queue intact.
+-                image = kv_;
++                // The snapshot only traverses entries; it needs no copied hash index.
++                // Finish every copy before detaching so allocation failure leaves the queue intact.
++                image.reserve(kv_.size());
++                for (const auto& entry : kv_) image.emplace_back(entry.first, entry.second);
+                 sequence = applied_sequence_;
+                 batch.swap(pending_);
+                 batch_bytes = pending_bytes_;
+diff --git a/cpp_engine/engine.h b/cpp_engine/engine.h
+index 0214497..ba02ad7 100644
+--- a/cpp_engine/engine.h
++++ b/cpp_engine/engine.h
+@@ -11,6 +11,8 @@
+ #include <string>
+ #include <thread>
+ #include <unordered_map>
++#include <utility>
++#include <vector>
+ 
+ namespace minikv {
+ 
+@@ -184,7 +186,7 @@ private:
+     void flush_pending();
+     // Requires both I/O and state locks; used only for the final shutdown flush.
+     void flush_locked();
+-    void install_snapshot(const std::unordered_map<std::string, std::string>& image, uint64_t sequence,
++    void install_snapshot(const std::vector<std::pair<std::string, std::string>>& image, uint64_t sequence,
+                           uint64_t& write_calls, uint64_t& written_bytes, uint64_t& installed_bytes);
+     void compact_wal(int64_t boundary, uint64_t& written_bytes);
+     void background_work();

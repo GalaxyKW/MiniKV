@@ -1,0 +1,117 @@
+{
+  "adoption": "not_adopted",
+  "case_counts": {
+    "planned": 16,
+    "valid": 16,
+    "invalid_or_insufficient": 0
+  },
+  "metric_counts": {
+    "qps": {
+      "planned": 8,
+      "observed": 8,
+      "pass": 6
+    },
+    "p99": {
+      "planned": 8,
+      "observed": 8,
+      "pass": 6
+    },
+    "p99_9": {
+      "planned": 8,
+      "observed": 8,
+      "pass": 6
+    },
+    "max": {
+      "planned": 8,
+      "observed": 8,
+      "pass": 7
+    },
+    "engine_rss": {
+      "planned": 8,
+      "observed": 8,
+      "pass": 8
+    },
+    "capture_hold": {
+      "planned": 4,
+      "observed": 4,
+      "pass": 3
+    }
+  },
+  "threshold_failure_count": 8,
+  "scenario_summary": [
+    {
+      "scenario": "primary",
+      "on_hold_mean_ms_run_medians": {
+        "A": 62.54503072916667,
+        "B": 56.57973639285714
+      },
+      "on_engine_rss_mib_run_medians": {
+        "A": 225.97265625,
+        "B": 221.904296875
+      },
+      "on_pair_ratios": {
+        "qps": [
+          0.903063085891784,
+          1.0226474732207087
+        ],
+        "p99": [
+          2.143986920305707,
+          0.9837282639440755
+        ],
+        "p99_9": [
+          1.5421643258448237,
+          0.9838471758945607
+        ],
+        "max": [
+          1.09580326784691,
+          1.0422361328154974
+        ],
+        "engine_rss": [
+          0.9800721199468589,
+          0.9839276745354093
+        ],
+        "capture_hold": [
+          0.9383870560908099,
+          0.8744778375777001
+        ]
+      }
+    },
+    {
+      "scenario": "stress",
+      "on_hold_mean_ms_run_medians": {
+        "A": 32.65740799206349,
+        "B": 20.479817645833336
+      },
+      "on_engine_rss_mib_run_medians": {
+        "A": 54.0703125,
+        "B": 50.287109375
+      },
+      "on_pair_ratios": {
+        "qps": [
+          1.177200310132039,
+          0.9783742309414862
+        ],
+        "p99": [
+          0.9412712122074748,
+          1.0668563822644221
+        ],
+        "p99_9": [
+          0.8963402790220081,
+          1.0250203133783224
+        ],
+        "max": [
+          0.5911397128963356,
+          0.7971174623558331
+        ],
+        "engine_rss": [
+          0.9299602457535237,
+          0.9301032565528197
+        ],
+        "capture_hold": [
+          0.5720805693515226,
+          0.6948883721780974
+        ]
+      }
+    }
+  ]
+}

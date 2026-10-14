@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "status": "pass",
+  "workspace": "/mnt/nvme/minikv-review/snapshot-vector-analysis-validation-_twk77cc",
+  "description": "Moved raw archive omits data/binaries/frozen; historical storage evidence is explicitly reused. Missing report/stats invalidates the originally passing stress ON pair.",
+  "cases": [
+    {
+      "name": "moved",
+      "root": "/mnt/nvme/minikv-review/snapshot-vector-analysis-validation-_twk77cc/moved-raw",
+      "derived": "/mnt/nvme/minikv-review/snapshot-vector-analysis-validation-_twk77cc/moved-derived",
+      "exit_code": 0,
+      "case_counts": {
+        "planned": 16,
+        "valid": 16,
+        "invalid_or_insufficient": 0
+      },
+      "adoption": "not_adopted",
+      "current_database_directories_present": 0,
+      "binary_verification": {
+        "primary-01-A": "recorded_hashes_only",
+        "primary-02-B": "recorded_hashes_only",
+        "primary-03-B": "recorded_hashes_only",
+        "primary-04-A": "recorded_hashes_only",
+        "stress-01-A": "recorded_hashes_only",
+        "stress-02-B": "recorded_hashes_only",
+        "stress-03-B": "recorded_hashes_only",
+        "stress-04-A": "recorded_hashes_only"
+      }
+    },
+    {
+      "name": "missing-report",
+      "root": "/mnt/nvme/minikv-review/snapshot-vector-analysis-validation-_twk77cc/missing-report",
+      "derived": "/mnt/nvme/minikv-review/snapshot-vector-analysis-validation-_twk77cc/missing-report-derived",
+      "exit_code": 1,
+      "case_counts": {
+        "planned": 16,
+        "valid": 15,
+        "invalid_or_insufficient": 1
+      },
+      "adoption": "not_adopted",
+      "current_database_directories_present": 0,
+      "binary_verification": {
+        "primary-01-A": "recorded_hashes_only",
+        "primary-02-B": "recorded_hashes_only",
+        "primary-03-B": "recorded_hashes_only",
+        "primary-04-A": "recorded_hashes_only",
+        "stress-01-A": "recorded_hashes_only",
+        "stress-02-B": "recorded_hashes_only",
+        "stress-03-B": "recorded_hashes_only",
+        "stress-04-A": "recorded_hashes_only"
+      },
+      "case_errors": [
+        "missing artifact: /mnt/nvme/minikv-review/snapshot-vector-analysis-validation-_twk77cc/missing-report/stress-03-B/r01-throughput-snapshot-on/report.json",
+        "client artifacts are not valid"
+      ]
+    },
+    {
+      "name": "missing-stats",
+      "root": "/mnt/nvme/minikv-review/snapshot-vector-analysis-validation-_twk77cc/missing-stats",
+      "derived": "/mnt/nvme/minikv-review/snapshot-vector-analysis-validation-_twk77cc/missing-stats-derived",
+      "exit_code": 1,
+      "case_counts": {
+        "planned": 16,
+        "valid": 15,
+        "invalid_or_insufficient": 1
+      },
+      "adoption": "not_adopted",
+      "current_database_directories_present": 0,
+      "binary_verification": {
+        "primary-01-A": "recorded_hashes_only",
+        "primary-02-B": "recorded_hashes_only",
+        "primary-03-B": "recorded_hashes_only",
+        "primary-04-A": "recorded_hashes_only",
+        "stress-01-A": "recorded_hashes_only",
+        "stress-02-B": "recorded_hashes_only",
+        "stress-03-B": "recorded_hashes_only",
+        "stress-04-A": "recorded_hashes_only"
+      },
+      "case_errors": [
+        "invalid snapshot observations"
+      ]
+    }
+  ],
+  "exact_integer_boundary_checks": 4
+}
